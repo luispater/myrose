@@ -4,6 +4,8 @@ import (
 	"github.com/luispater/myrose/utils"
 	"strings"
 	"fmt"
+	"github.com/kataras/iris/core/errors"
+	"database/sql"
 )
 
 type Table struct {
@@ -19,7 +21,7 @@ type Table struct {
 	join            []interface{}            // join
 	distinct        bool                     // distinct
 	group           []string                 // group
-	having          [][]interface{}          // having
+	having          []interface{}            // having
 	data            interface{}              // data
 	conditionValues map[string]interface{}   // query condition value
 }
@@ -97,11 +99,7 @@ func (this *Table) Fields(fields ...string) *Table {
 	return this
 }
 
-func (this *Table) Data(data interface{}) *Table {
-	return this
-}
-
-func (this *Table) Group(group []string) *Table {
+func (this *Table) Group(group ...string) *Table {
 	if this.group == nil {
 		this.group = make([]string, 0)
 	}
@@ -213,56 +211,6 @@ func (this *Table) RightJoin(table *Table, thisTableColumn, joinTableColumn stri
 	return this.joinCommon("RIGHT", table, thisTableColumn, joinTableColumn)
 }
 
-func (this *Table) Get() ([]map[string]interface{}, error) {
-	strSql, argv := this.buildQuery("SELECT")
-	return this.Query(strSql, argv)
-}
-
-func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
-	results := make([]map[string]interface{}, 0)
-	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
-	fmt.Println(strSql, argv)
-	stmt, err := this.connection.DB.Prepare(strSql)
-	if err != nil {
-		return results, err
-	}
-
-	rows, err := stmt.Query(argv ...)
-	if err != nil {
-		return results, err
-	}
-	stmt.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return results, err
-	}
-	count := len(columns)
-	values := make([]interface{}, count)
-	scanArgs := make([]interface{}, count)
-
-	for rows.Next() {
-		for i := 0; i < count; i++ {
-			scanArgs[i] = &values[i]
-		}
-		rows.Scan(scanArgs...)
-		entry := make(map[string]interface{})
-		for i, col := range columns {
-			var v interface{}
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				v = string(b)
-			} else {
-				v = val
-			}
-			entry[col] = v
-		}
-		results = append(results, entry)
-	}
-	rows.Close()
-	return results, nil
-}
-
 func (this *Table) getConditionName(prefix, columnName string, value interface{}) string {
 	this.connection.GlobalId++
 	strConditionName := fmt.Sprintf("%s_%d_%s", prefix, this.connection.GlobalId, columnName)
@@ -327,7 +275,7 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		whereLen := len(arrayCondition)
 		arrayWhereCondition := make([]string, 3)
 		if whereLen == 2 { // columnName, value: `columnName`=1
-			if (len(this.join) > 0) || (tableName!=this.name)  {
+			if (len(this.join) > 0) || (tableName != this.name) {
 				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
 			} else {
 				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
@@ -337,7 +285,7 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 			arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[1])
 		} else if whereLen == 3 { // columnName, operation, value: `columnName`>=1
 			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
-			if (len(this.join) > 0) || (tableName!=this.name)  {
+			if (len(this.join) > 0) || (tableName != this.name) {
 				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
 			} else {
 				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
@@ -377,7 +325,7 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		arrayJoin := this.join[i].([]interface{})
 		joinDetail := arrayJoin[1].([]interface{})
 		strWhere = joinDetail[0].(*Table).parseWhere(this.name, strWhere)
-		for k, v:= range joinDetail[0].(*Table).conditionValues {
+		for k, v := range joinDetail[0].(*Table).conditionValues {
 			this.conditionValues[k] = v
 		}
 	}
@@ -398,50 +346,232 @@ func (this *Table) parseJoin() string {
 	return strJoin
 }
 
+func (this *Table) parseGroup() string {
+	strGroup := ""
+	arrayGroup := make([]string, 0)
+	for i := range this.group {
+		if len(this.join) > 0 {
+			arrayGroup = append(arrayGroup, "`"+this.name+"`.`"+this.group[i]+"`")
+		} else {
+			arrayGroup = append(arrayGroup, "`"+this.group[i]+"`")
+		}
+	}
+	if len(arrayGroup) > 0 {
+		strGroup = utils.Implode(", ", arrayGroup)
+	}
+	return strGroup
+}
+
 func (this *Table) buildQuery(queryType string) (string, map[string]interface{}) {
-	sql := ""
+	strSql := ""
 	if queryType == "SELECT" {
-		sql = "SELECT "
-	}
-	if len(this.fields) > 0 {
-		arrayFields := make([]string, 0)
-		for i := range this.fields {
-			asIndex := strings.Index(strings.ToUpper(this.fields[i]), " AS ")
-			var field string
-			if asIndex == -1 {
-				field = this.fields[i]
-				fieldSql := "`" + this.name + "`.`" + field + "`"
-				arrayFields = append(arrayFields, fieldSql)
-			} else {
-				field = this.fields[i][:asIndex]
-				fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
-				arrayFields = append(arrayFields, fieldSql)
+		strSql = "SELECT "
+		if len(this.fields) > 0 {
+			arrayFields := make([]string, 0)
+			for i := range this.fields {
+				asIndex := strings.Index(strings.ToUpper(this.fields[i]), " AS ")
+				var field string
+				if asIndex == -1 {
+					field = this.fields[i]
+					fieldSql := "`" + this.name + "`.`" + field + "`"
+					arrayFields = append(arrayFields, fieldSql)
+				} else {
+					field = this.fields[i][:asIndex]
+					fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
+					arrayFields = append(arrayFields, fieldSql)
+				}
 			}
+			strSql += utils.Implode(", ", arrayFields)
+		} else {
+			strSql += "`" + this.name + "`.*"
 		}
-		sql += utils.Implode(", ", arrayFields)
+		strSql += " FROM `" + this.name + "`"
+
+		joinSql := this.parseJoin()
+		if len(joinSql) > 0 {
+			strSql += " " + joinSql
+		}
+
+		whereSql := this.parseWhere(this.name, "")
+		if len(whereSql) > 0 {
+			strSql += " WHERE " + whereSql
+		}
+
+		groupSql := this.parseGroup()
+		if len(groupSql) > 0 {
+			strSql += " GROUP BY " + groupSql
+		}
+
+		if len(this.order) > 0 {
+			arrayOrders := make([]string, 0)
+			for i := range this.order {
+				orderSql := "`" + this.name + "`.`" + this.order[i][0] + "` " + this.order[i][1]
+				arrayOrders = append(arrayOrders, orderSql)
+			}
+			strSql += " ORDER BY " + utils.Implode(", ", arrayOrders)
+		}
+
+		if this.limit > 0 {
+			strSql += fmt.Sprintf(" LIMIT %d", this.limit)
+		}
+		if this.offset > 0 {
+			strSql += fmt.Sprintf(" OFFSET %d", this.offset)
+		}
+	} else if queryType == "INSERT" {
+		strSql = "INSERT INTO `" + this.name + "` SET "
+		arrayInserts := make([]string, 0)
+		for key, value := range this.data.(map[string]interface{}) {
+			strInsert := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
+			arrayInserts = append(arrayInserts, strInsert)
+		}
+		strSql += utils.Implode(", ", arrayInserts)
+	} else if queryType == "UPDATE" {
+		strSql = "UPDATE `" + this.name + "` SET "
+
+		arrayUpdates := make([]string, 0)
+		for key, value := range this.data.(map[string]interface{}) {
+			strUpdate := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
+			arrayUpdates = append(arrayUpdates, strUpdate)
+		}
+		strSql += utils.Implode(", ", arrayUpdates)
+
+		whereSql := this.parseWhere(this.name, "")
+		if len(whereSql) > 0 {
+			strSql += " WHERE " + whereSql
+		}
+	} else if queryType == "DELETE" {
+		strSql = "DELETE FROM `" + this.name + "`"
+		whereSql := this.parseWhere(this.name, "")
+		if len(whereSql) > 0 {
+			strSql += " WHERE " + whereSql
+		}
+	}
+	return strSql, this.conditionValues
+}
+
+func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
+	results := make([]map[string]interface{}, 0)
+	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
+	fmt.Println(strSql, argv)
+	stmt, err := this.connection.DB.Prepare(strSql)
+	if err != nil {
+		return results, err
+	}
+
+	rows, err := stmt.Query(argv ...)
+	if err != nil {
+		return results, err
+	}
+	stmt.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return results, err
+	}
+	count := len(columns)
+	values := make([]interface{}, count)
+	scanArgs := make([]interface{}, count)
+
+	for rows.Next() {
+		for i := 0; i < count; i++ {
+			scanArgs[i] = &values[i]
+		}
+		rows.Scan(scanArgs...)
+		entry := make(map[string]interface{})
+		for i, col := range columns {
+			var v interface{}
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				v = string(b)
+			} else {
+				v = val
+			}
+			entry[col] = v
+		}
+		results = append(results, entry)
+	}
+	rows.Close()
+	return results, nil
+}
+
+func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
+	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
+	fmt.Println(strSql, argv)
+	var stmt *sql.Stmt
+	var err error
+	if this.connection.Transaction {
+		stmt, err = this.connection.Tx.Prepare(strSql)
 	} else {
-		sql += "`" + this.name + "`.*"
-	}
-	sql += " FROM `" + this.name + "`"
-
-	joinSql := this.parseJoin()
-	if len(joinSql) > 0 {
-		sql += " " + joinSql
+		stmt, err = this.connection.DB.Prepare(strSql)
 	}
 
-	whereSql := this.parseWhere(this.name, "")
-	if len(whereSql) > 0 {
-		sql += " WHERE " + whereSql
+	if err != nil {
+		return 0, err
 	}
+	queryResult, errs := stmt.Exec(argv...)
+	if errs != nil {
+		stmt.Close()
+		return 0, errs
+	}
+	var result int64
+	switch strSql[:6] {
+	case "INSERT":
+		result, err = queryResult.LastInsertId()
+	case "UPDATE":
+		result, err = queryResult.RowsAffected()
+	case "DELETE":
+		result, err = queryResult.RowsAffected()
+	}
+	stmt.Close()
+	return result, err
+}
 
-	if len(this.order) > 0 {
-		arrayOrders := make([]string, 0)
-		for i := range this.order {
-			orderSql := "`" + this.name + "`.`" + this.order[i][0] + "` " + this.order[i][1]
-			arrayOrders = append(arrayOrders, orderSql)
+func (this *Table) Get() ([]map[string]interface{}, error) {
+	strSql, argv := this.buildQuery("SELECT")
+	return this.Query(strSql, argv)
+}
+
+func (this *Table) First() (map[string]interface{}, error) {
+	limit := this.limit
+	offset := this.offset
+	defer func() { this.limit = limit; this.offset = offset }() //revert
+	this.limit = 1
+	this.offset = 0
+
+	strSql, argv := this.buildQuery("SELECT")
+	result, err := this.Query(strSql, argv)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result[0], nil
+}
+
+func (this *Table) Insert(data map[string]interface{}) (int64, error) {
+	for key := range data {
+		if !this.HasColumn(key) {
+			return 0, errors.New("Unknown `Insert` column '" + key + "' in 'field list'")
 		}
-		sql += " ORDER BY " + utils.Implode(", ", arrayOrders)
 	}
+	this.data = data
+	strSql, argv := this.buildQuery("INSERT")
+	return this.Execute(strSql, argv)
+}
 
-	return sql, this.conditionValues
+func (this *Table) Update(data map[string]interface{}) (int64, error) {
+	for key := range data {
+		if !this.HasColumn(key) {
+			return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
+		}
+	}
+	this.data = data
+	strSql, argv := this.buildQuery("UPDATE")
+	return this.Execute(strSql, argv)
+}
+
+func (this *Table) Delete() (int64, error) {
+	strSql, argv := this.buildQuery("DELETE")
+	return this.Execute(strSql, argv)
 }
