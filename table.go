@@ -16,7 +16,7 @@ type Table struct {
 	order           [][]string               // order
 	limit           int                      // limit
 	offset          int                      // offset
-	join            []map[*Table]interface{} // join
+	join            []interface{}            // join
 	distinct        bool                     // distinct
 	group           []string                 // group
 	having          [][]interface{}          // having
@@ -154,7 +154,7 @@ func (this *Table) Offset(offset int) *Table {
 	return this
 }
 
-func (this *Table) Where(args ...interface{}) *Table {
+func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 	if this.where == nil {
 		this.where = make([]interface{}, 0)
 	}
@@ -163,7 +163,7 @@ func (this *Table) Where(args ...interface{}) *Table {
 		panic("Split column name in Where method")
 	} else if (argsLen == 2) || (argsLen == 3) {
 		if this.HasColumn(utils.ToStr(args[0])) {
-			this.where = append(this.where, []interface{}{"AND", args})
+			this.where = append(this.where, []interface{}{whereType, args})
 		} else {
 			panic("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
 		}
@@ -171,46 +171,46 @@ func (this *Table) Where(args ...interface{}) *Table {
 		panic("Too much `Where` conditions")
 	}
 	return this
+}
+
+func (this *Table) Where(args ...interface{}) *Table {
+	return this.whereCommon("AND", args...)
 }
 
 func (this *Table) OrWhere(args ...interface{}) *Table {
-	if this.where == nil {
-		this.where = make([]interface{}, 0)
-	}
-	argsLen := len(args)
-	if argsLen < 2 {
-		panic("Split column name in Where method")
-	} else if (argsLen == 2) || (argsLen == 3) {
-		if this.HasColumn(utils.ToStr(args[0])) {
-			this.where = append(this.where, []interface{}{"OR", args})
-		} else {
-			panic("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
-		}
-	} else {
-		panic("Too much `Where` conditions")
-	}
-	return this
+	return this.whereCommon("OR", args...)
 }
 
-func (this *Table) Join(table *Table, on ...interface{}) *Table {
+func (this *Table) joinCommon(joinType string, table *Table, thisTableColumn, joinTableColumn string) *Table {
 	if this.join == nil {
-		this.join = make([]map[*Table]interface{}, 0)
+		this.join = make([]interface{}, 0)
 	}
+
+	if !this.HasColumn(thisTableColumn) {
+		panic("Unknown `Join` column '" + thisTableColumn + "' in table `" + this.name + "` 'field list'")
+	} else if !table.HasColumn(joinTableColumn) {
+		panic("Unknown `Join` column '" + joinTableColumn + "' in table `" + table.name + "` 'field list'")
+	}
+
+	joinDetail := make([]interface{}, 0)
+	joinDetail = append(joinDetail, table)
+	joinDetail = append(joinDetail, thisTableColumn)
+	joinDetail = append(joinDetail, joinTableColumn)
+	this.join = append(this.join, []interface{}{joinType, joinDetail})
 	return this
+
 }
 
-func (this *Table) LeftJoin(table *Table, on ...interface{}) *Table {
-	if this.join == nil {
-		this.join = make([]map[*Table]interface{}, 0)
-	}
-	return this
+func (this *Table) Join(table *Table, thisTableColumn, joinTableColumn string) *Table {
+	return this.joinCommon("INNER", table, thisTableColumn, joinTableColumn)
 }
 
-func (this *Table) RightJoin(table *Table, on ...interface{}) *Table {
-	if this.join == nil {
-		this.join = make([]map[*Table]interface{}, 0)
-	}
-	return this
+func (this *Table) LeftJoin(table *Table, thisTableColumn, joinTableColumn string) *Table {
+	return this.joinCommon("LEFT", table, thisTableColumn, joinTableColumn)
+}
+
+func (this *Table) RightJoin(table *Table, thisTableColumn, joinTableColumn string) *Table {
+	return this.joinCommon("RIGHT", table, thisTableColumn, joinTableColumn)
 }
 
 func (this *Table) Get() ([]map[string]interface{}, error) {
@@ -278,7 +278,7 @@ func (this *Table) parseInCondition(fieldName string, argv interface{}) string {
 		for k, v := range mapArgv {
 			this.conditionValues[k] = v
 		}
-		result =  "(" + strSql + ")"
+		result = "(" + strSql + ")"
 	case []int64:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]int64) {
@@ -319,21 +319,29 @@ func (this *Table) parseInCondition(fieldName string, argv interface{}) string {
 	return result
 }
 
-func (this *Table) parseWhere() string {
-	strWhere := ""
+func (this *Table) parseWhere(tableName, strWhere string) string {
 	var strCondition string
 	for i := range this.where {
 		arrayWhere := this.where[i].([]interface{})
 		arrayCondition := arrayWhere[1].([]interface{})
 		whereLen := len(arrayCondition)
 		arrayWhereCondition := make([]string, 3)
-		if whereLen == 2 {
-			arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+		if whereLen == 2 { // columnName, value: `columnName`=1
+			if (len(this.join) > 0) || (tableName!=this.name)  {
+				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
+			} else {
+				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+			}
+
 			arrayWhereCondition[1] = "="
 			arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[1])
-		} else if whereLen == 3 {
+		} else if whereLen == 3 { // columnName, operation, value: `columnName`>=1
 			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
-			arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+			if (len(this.join) > 0) || (tableName!=this.name)  {
+				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
+			} else {
+				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+			}
 			arrayWhereCondition[1] = operation
 
 			switch operation {
@@ -354,16 +362,40 @@ func (this *Table) parseWhere() string {
 			default:
 				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
 			}
+		} else if whereLen == 4 { // table, columnName, operation, value: `table2`.`columnName`>=1
+
 		}
 		strCondition = utils.Implode(" ", arrayWhereCondition)
 
-		if i > 0 {
+		if len(strWhere) > 0 {
 			strWhere += " " + arrayWhere[0].(string) + " " + strCondition
 		} else {
 			strWhere += strCondition
 		}
 	}
+	for i := range this.join {
+		arrayJoin := this.join[i].([]interface{})
+		joinDetail := arrayJoin[1].([]interface{})
+		strWhere = joinDetail[0].(*Table).parseWhere(this.name, strWhere)
+		for k, v:= range joinDetail[0].(*Table).conditionValues {
+			this.conditionValues[k] = v
+		}
+	}
 	return strWhere
+}
+
+func (this *Table) parseJoin() string {
+	strJoin := ""
+	arrayJoins := make([]string, 0)
+	for i := range this.join {
+		arrayJoin := this.join[i].([]interface{})
+		joinType := arrayJoin[0].(string)
+		joinDetail := arrayJoin[1].([]interface{})
+		strJoin := joinType + " JOIN `" + joinDetail[0].(*Table).name + "` ON `" + this.name + "`.`" + utils.ToStr(joinDetail[1]) + "`=`" + joinDetail[0].(*Table).name + "`.`" + utils.ToStr(joinDetail[2]) + "`"
+		arrayJoins = append(arrayJoins, strJoin)
+	}
+	strJoin = utils.Implode(" ", arrayJoins)
+	return strJoin
 }
 
 func (this *Table) buildQuery(queryType string) (string, map[string]interface{}) {
@@ -392,7 +424,12 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 	}
 	sql += " FROM `" + this.name + "`"
 
-	whereSql := this.parseWhere()
+	joinSql := this.parseJoin()
+	if len(joinSql) > 0 {
+		sql += " " + joinSql
+	}
+
+	whereSql := this.parseWhere(this.name, "")
 	if len(whereSql) > 0 {
 		sql += " WHERE " + whereSql
 	}
