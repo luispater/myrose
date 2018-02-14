@@ -4,7 +4,7 @@ import (
 	"github.com/luispater/myrose/utils"
 	"strings"
 	"fmt"
-	"github.com/kataras/iris/core/errors"
+	"errors"
 	"database/sql"
 )
 
