@@ -32,6 +32,7 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 	this.name = tableName
 	this.connection = connection
 	this.conditionValues = make(map[string]interface{})
+	this.errs = make([]error, 0)
 
 	rows, err := connection.DB.Query("DESC `" + tableName + "`")
 	if err != nil {
