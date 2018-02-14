@@ -13,15 +13,32 @@ type Connection struct {
 	GlobalId int64
 }
 
-func New() (*Connection, error) {
+var dbConnection *Connection
+
+func newConnection() (*Connection, error) {
 	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?charset=%s", "test", "test", "tcp", "localhost", "3306", "20171118", "utf8")
-	dbConnection, err := sql.Open("mysql", dsn)
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
-	connection := new(Connection)
-	connection.DB = dbConnection
-	return connection, nil
+	if dbConnection==nil {
+		dbConnection = new(Connection)
+	}
+	dbConnection.DB = db
+	return dbConnection, nil
+}
+
+func New() (*Connection, error) {
+	if dbConnection != nil {
+		err := dbConnection.DB.Ping()
+		if err == nil {
+			return dbConnection, nil
+		} else {
+			return newConnection()
+		}
+	} else {
+		return newConnection()
+	}
 }
 
 func (this *Connection) Close() error {
