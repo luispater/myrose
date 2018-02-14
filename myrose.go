@@ -7,10 +7,10 @@ import (
 )
 
 type Connection struct {
-	DB *sql.DB
-	Tx *sql.Tx
+	DB          *sql.DB
+	Tx          *sql.Tx
 	Transaction bool
-	GlobalId int64
+	GlobalId    int64
 }
 
 var dbConnection *Connection
@@ -21,10 +21,12 @@ func newConnection() (*Connection, error) {
 	if err != nil {
 		return nil, err
 	}
-	if dbConnection==nil {
+	if dbConnection == nil {
 		dbConnection = new(Connection)
 	}
 	dbConnection.DB = db
+	dbConnection.DB.SetMaxIdleConns(10)
+	dbConnection.DB.SetMaxOpenConns(50)
 	return dbConnection, nil
 }
 
@@ -49,19 +51,29 @@ func (this *Connection) Ping() error {
 	return this.DB.Ping()
 }
 
-func (this *Connection) Begin() {
-	this.Tx, _ = this.DB.Begin()
-	this.Transaction = true
+func (this *Connection) Begin() error {
+	tx, err := this.DB.Begin()
+	if err == nil {
+		this.Tx = tx
+		this.Transaction = true
+	}
+	return err
 }
 
-func (this *Connection) Commit() {
-	this.Tx.Commit()
-	this.Transaction = false
+func (this *Connection) Commit() error {
+	err := this.Tx.Commit()
+	if err == nil {
+		this.Transaction = false
+	}
+	return err
 }
 
-func (this *Connection) Rollback() {
-	this.Tx.Rollback()
-	this.Transaction = false
+func (this *Connection) Rollback() error {
+	err := this.Tx.Rollback()
+	if err == nil {
+		this.Transaction = false
+	}
+	return err
 }
 
 func (this *Connection) Table(name string) *Table {

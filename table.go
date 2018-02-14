@@ -14,6 +14,7 @@ type Table struct {
 	name            string                   // table name
 	fieldList       []string                 // table filed list
 	fields          []string                 // fields
+	alias           []string                 // fields alias
 	where           []interface{}            // where
 	order           [][]string               // order
 	limit           int                      // limit
@@ -24,6 +25,7 @@ type Table struct {
 	having          []interface{}            // having
 	data            interface{}              // data
 	conditionValues map[string]interface{}   // query condition value
+	errs            []error                  // errors
 }
 
 func (this *Table) Init(tableName string, connection *Connection) *Table {
@@ -81,19 +83,27 @@ func (this *Table) HasColumn(column string) bool {
 	return utils.InArray(column, this.fieldList)
 }
 
+func (this *Table) addError(err string) {
+	this.errs = append(this.errs, errors.New(err))
+}
+
 func (this *Table) Fields(fields ...string) *Table {
 	for i := range fields {
+		// TODO: 此处需要处理函数型字段名
 		asIndex := strings.Index(strings.ToUpper(fields[i]), " AS ")
-		var field string
+		var field, alias string
 		if asIndex == -1 {
 			field = fields[i]
+			alias = fields[i]
 		} else {
 			field = fields[i][:asIndex]
+			alias = fields[i][asIndex+4:]
 		}
 		if this.HasColumn(field) {
 			this.fields = append(this.fields, fields[i])
+			this.alias = append(this.alias, alias)
 		} else {
-			panic("Unknown `Fetch` column '" + field + "' in 'field list'")
+			this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
 		}
 	}
 	return this
@@ -107,7 +117,7 @@ func (this *Table) Group(group ...string) *Table {
 		if this.HasColumn(group[i]) {
 			this.group = append(this.group, group[i])
 		} else {
-			panic("Unknown `Group By` column '" + group[i] + "' in 'field list'")
+			this.addError("Unknown `Group By` column '" + group[i] + "' in 'field list'")
 		}
 	}
 	return this
@@ -118,7 +128,7 @@ func (this *Table) Order(args ...interface{}) *Table {
 		this.order = make([][]string, 0)
 	}
 	if len(args) > 2 {
-		panic("`Order` method params error.")
+		this.addError("`Order` method params error")
 	}
 	var columnName, sequence string
 	if len(args) == 1 {
@@ -136,7 +146,7 @@ func (this *Table) Order(args ...interface{}) *Table {
 			this.order = append(this.order, []string{columnName, "ASC"})
 		}
 	} else {
-		panic("Unknown `Order By` column '" + columnName + "' in 'field list'")
+		this.addError("Unknown `Order By` column '" + columnName + "' in 'field list'")
 	}
 
 	return this
@@ -158,15 +168,16 @@ func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 	}
 	argsLen := len(args)
 	if argsLen < 2 {
-		panic("Split column name in Where method")
+		this.addError("Split column name in Where method")
 	} else if (argsLen == 2) || (argsLen == 3) {
+		// TODO: 此处需要处理函数型字段名
 		if this.HasColumn(utils.ToStr(args[0])) {
 			this.where = append(this.where, []interface{}{whereType, args})
 		} else {
-			panic("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
+			this.addError("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
 		}
 	} else {
-		panic("Too much `Where` conditions")
+		this.addError("Too much `Where` conditions")
 	}
 	return this
 }
@@ -185,9 +196,9 @@ func (this *Table) joinCommon(joinType string, table *Table, thisTableColumn, jo
 	}
 
 	if !this.HasColumn(thisTableColumn) {
-		panic("Unknown `Join` column '" + thisTableColumn + "' in table `" + this.name + "` 'field list'")
+		this.addError("Unknown `Join` column '" + thisTableColumn + "' in table `" + this.name + "` 'field list'")
 	} else if !table.HasColumn(joinTableColumn) {
-		panic("Unknown `Join` column '" + joinTableColumn + "' in table `" + table.name + "` 'field list'")
+		this.addError("Unknown `Join` column '" + joinTableColumn + "' in table `" + table.name + "` 'field list'")
 	}
 
 	joinDetail := make([]interface{}, 0)
