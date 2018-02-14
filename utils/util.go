@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"strings"
+	"sort"
 )
 
 func InArray(needle interface{}, hystack interface{}) bool {
@@ -52,3 +53,21 @@ func Implode(glue string, pieces []string) string {
 	return strings.Join(pieces, glue)
 }
 
+func GetNamedSQL(strSql string, argv map[string]interface{}) (string, []interface{}) {
+	arrayIndexs := make([]int, 0)
+	mapArgv := make(map[int]interface{})
+	newArgv := make([]interface{}, 0)
+	for key, value := range argv {
+		intIndex := strings.Index(strSql, ":"+key)
+		if intIndex!=-1 {
+			arrayIndexs = append(arrayIndexs, intIndex)
+			mapArgv[intIndex] = value
+			strSql = strings.Replace(strSql, ":"+key, "?", 1)
+		}
+	}
+	sort.Ints(arrayIndexs)
+	for i := range arrayIndexs {
+		newArgv = append(newArgv, mapArgv[arrayIndexs[i]])
+	}
+	return strSql, newArgv
+}

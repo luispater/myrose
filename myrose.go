@@ -14,7 +14,7 @@ type Connection struct {
 }
 
 func New() (*Connection, error) {
-	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?charset=%s", "test", "test", "tcp", "localhost", "3306", "test", "utf8")
+	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?charset=%s", "test", "test", "tcp", "localhost", "3306", "20171118", "utf8")
 	dbConnection, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err

@@ -7,25 +7,27 @@ import (
 )
 
 type Table struct {
-	connection *Connection              //db connection
-	schema     []map[string]interface{} //schema
-	name       string                   // table name
-	fieldList  []string                 //table filed list
-	fields     []string                 // fields
-	where      []interface{}            // where
-	order      [][]string               // order
-	limit      int                      // limit
-	offset     int                      // offset
-	join       []map[*Table]interface{} // join
-	distinct   bool                     // distinct
-	group      []string                 // group
-	having     [][]interface{}          // having
-	data       interface{}              // data
+	connection      *Connection              // db connection
+	schema          []map[string]interface{} // schema
+	name            string                   // table name
+	fieldList       []string                 // table filed list
+	fields          []string                 // fields
+	where           []interface{}            // where
+	order           [][]string               // order
+	limit           int                      // limit
+	offset          int                      // offset
+	join            []map[*Table]interface{} // join
+	distinct        bool                     // distinct
+	group           []string                 // group
+	having          [][]interface{}          // having
+	data            interface{}              // data
+	conditionValues map[string]interface{}   // query condition value
 }
 
 func (this *Table) Init(tableName string, connection *Connection) *Table {
 	this.name = tableName
 	this.connection = connection
+	this.conditionValues = make(map[string]interface{})
 
 	rows, err := connection.DB.Query("DESC `" + tableName + "`")
 	if err != nil {
@@ -65,6 +67,7 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 		fileds = append(fileds, schema[i]["Field"].(string))
 	}
 	this.fieldList = fileds
+	rows.Close()
 	return this
 }
 
@@ -158,12 +161,14 @@ func (this *Table) Where(args ...interface{}) *Table {
 	argsLen := len(args)
 	if argsLen < 2 {
 		panic("Split column name in Where method")
-	} else if argsLen == 2 {
+	} else if (argsLen == 2) || (argsLen == 3) {
 		if this.HasColumn(utils.ToStr(args[0])) {
-			this.where = append(this.where, []interface{}{"and", args})
+			this.where = append(this.where, []interface{}{"AND", args})
 		} else {
 			panic("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
 		}
+	} else {
+		panic("Too much `Where` conditions")
 	}
 	return this
 }
@@ -174,13 +179,15 @@ func (this *Table) OrWhere(args ...interface{}) *Table {
 	}
 	argsLen := len(args)
 	if argsLen < 2 {
-		panic("Split column name in OrWhere method")
-	} else if argsLen == 2 {
-		if utils.InArray(utils.ToStr(args[0]), this.fieldList) {
-			this.where = append(this.where, []interface{}{"and", args})
+		panic("Split column name in Where method")
+	} else if (argsLen == 2) || (argsLen == 3) {
+		if this.HasColumn(utils.ToStr(args[0])) {
+			this.where = append(this.where, []interface{}{"OR", args})
 		} else {
 			panic("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
 		}
+	} else {
+		panic("Too much `Where` conditions")
 	}
 	return this
 }
@@ -207,15 +214,159 @@ func (this *Table) RightJoin(table *Table, on ...interface{}) *Table {
 }
 
 func (this *Table) Get() ([]map[string]interface{}, error) {
-	fmt.Println(this.buildQuery("SELECT"))
-	return nil, nil
+	strSql, argv := this.buildQuery("SELECT")
+	return this.Query(strSql, argv)
+}
+
+func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
+	results := make([]map[string]interface{}, 0)
+	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
+	fmt.Println(strSql, argv)
+	stmt, err := this.connection.DB.Prepare(strSql)
+	if err != nil {
+		return results, err
+	}
+
+	rows, err := stmt.Query(argv ...)
+	if err != nil {
+		return results, err
+	}
+	stmt.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return results, err
+	}
+	count := len(columns)
+	values := make([]interface{}, count)
+	scanArgs := make([]interface{}, count)
+
+	for rows.Next() {
+		for i := 0; i < count; i++ {
+			scanArgs[i] = &values[i]
+		}
+		rows.Scan(scanArgs...)
+		entry := make(map[string]interface{})
+		for i, col := range columns {
+			var v interface{}
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				v = string(b)
+			} else {
+				v = val
+			}
+			entry[col] = v
+		}
+		results = append(results, entry)
+	}
+	rows.Close()
+	return results, nil
+}
+
+func (this *Table) getConditionName(prefix, columnName string, value interface{}) string {
+	this.connection.GlobalId++
+	strConditionName := fmt.Sprintf("%s_%d_%s", prefix, this.connection.GlobalId, columnName)
+	this.conditionValues[strConditionName] = value
+	return ":" + strConditionName
+}
+
+func (this *Table) parseInCondition(fieldName string, argv interface{}) string {
+	result := ""
+	switch argv.(type) {
+	case *Table:
+		strSql, mapArgv := argv.(*Table).buildQuery("SELECT")
+		for k, v := range mapArgv {
+			this.conditionValues[k] = v
+		}
+		result =  "(" + strSql + ")"
+	case []int64:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]int64) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]int64)[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	case []int:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]int) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]int)[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	case []string:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]string) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]string)[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	case []float64:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]float64) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]float64)[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	case []float32:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]float32) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]float32)[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	case []interface{}:
+		arrayConditionNames := make([]string, 0)
+		for i := range argv.([]interface{}) {
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]interface{})[i]))
+		}
+		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
+	}
+	return result
 }
 
 func (this *Table) parseWhere() string {
-	return ""
+	strWhere := ""
+	var strCondition string
+	for i := range this.where {
+		arrayWhere := this.where[i].([]interface{})
+		arrayCondition := arrayWhere[1].([]interface{})
+		whereLen := len(arrayCondition)
+		arrayWhereCondition := make([]string, 3)
+		if whereLen == 2 {
+			arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+			arrayWhereCondition[1] = "="
+			arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[1])
+		} else if whereLen == 3 {
+			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
+			arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+			arrayWhereCondition[1] = operation
+
+			switch operation {
+			case "LIKE":
+				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+			case "NOT LIKE":
+				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+			case "IN":
+				arrayWhereCondition[2] = this.parseInCondition(arrayWhereCondition[0], arrayCondition[2])
+			case "NOT IN":
+				arrayWhereCondition[2] = this.parseInCondition(arrayWhereCondition[0], arrayCondition[2])
+			case "IS":
+				arrayWhereCondition[2] = "NULL"
+			case "IS NOT":
+				arrayWhereCondition[2] = "NULL"
+			case "BETWEEN":
+			case "NOT BETWEEN":
+			default:
+				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+			}
+		}
+		strCondition = utils.Implode(" ", arrayWhereCondition)
+
+		if i > 0 {
+			strWhere += " " + arrayWhere[0].(string) + " " + strCondition
+		} else {
+			strWhere += strCondition
+		}
+	}
+	return strWhere
 }
 
-func (this *Table) buildQuery(queryType string) string {
+func (this *Table) buildQuery(queryType string) (string, map[string]interface{}) {
 	sql := ""
 	if queryType == "SELECT" {
 		sql = "SELECT "
@@ -242,7 +393,7 @@ func (this *Table) buildQuery(queryType string) string {
 	sql += " FROM `" + this.name + "`"
 
 	whereSql := this.parseWhere()
-	if len(whereSql)>0 {
+	if len(whereSql) > 0 {
 		sql += " WHERE " + whereSql
 	}
 
@@ -254,5 +405,6 @@ func (this *Table) buildQuery(queryType string) string {
 		}
 		sql += " ORDER BY " + utils.Implode(", ", arrayOrders)
 	}
-	return sql
+
+	return sql, this.conditionValues
 }

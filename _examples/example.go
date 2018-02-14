@@ -10,6 +10,8 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	db.Table("first").Fields("i_hash AS nn", "i_hint as t").Order("i_hint", "DESC").Get()
-	db.Table("first").Order("i_hash").Get()
+	a := db.Table("center").Where("ce_id", "IN", db.Table("customer").Fields("ce_id").Where("c_id", "IN", []int{54149471, 54204647}))
+	b, err := a.Get()
+	fmt.Println(b, err)
+
 }
