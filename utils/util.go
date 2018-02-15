@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"sort"
+	"crypto/md5"
+	"io"
 )
 
 func InArray(needle interface{}, hystack interface{}) bool {
@@ -51,6 +53,12 @@ func ToStr(obj interface{}) string {
 
 func Implode(glue string, pieces []string) string {
 	return strings.Join(pieces, glue)
+}
+
+func Md5(str string) string {
+	h := md5.New()
+	io.WriteString(h, str)
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func GetNamedSQL(strSql string, argv map[string]interface{}) (string, []interface{}) {

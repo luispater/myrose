@@ -3,7 +3,7 @@ package myrose
 import (
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
-	"fmt"
+	//"fmt"
 )
 
 type Connection struct {
@@ -15,8 +15,7 @@ type Connection struct {
 
 var dbConnection *Connection
 
-func newConnection() (*Connection, error) {
-	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?charset=%s", "test", "test", "tcp", "localhost", "3306", "20171118", "utf8")
+func newConnection(dsn string) (*Connection, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
@@ -25,22 +24,33 @@ func newConnection() (*Connection, error) {
 		dbConnection = new(Connection)
 	}
 	dbConnection.DB = db
-	dbConnection.DB.SetMaxIdleConns(10)
-	dbConnection.DB.SetMaxOpenConns(50)
 	return dbConnection, nil
 }
 
-func New() (*Connection, error) {
+//dsn format: root:@tcp(localhost:3306)/test?charset=utf8
+func New(dsn string) (*Connection, error) {
 	if dbConnection != nil {
 		err := dbConnection.DB.Ping()
 		if err == nil {
 			return dbConnection, nil
 		} else {
-			return newConnection()
+			return newConnection(dsn)
 		}
 	} else {
-		return newConnection()
+		return newConnection(dsn)
 	}
+}
+
+func NewData() map[string]interface{} {
+	return make(map[string]interface{})
+}
+
+func (this *Connection) SetMaxIdleConns(n int) {
+	this.DB.SetMaxIdleConns(10)
+}
+
+func (this *Connection) SetMaxOpenConns(n int) {
+	this.DB.SetMaxOpenConns(50)
 }
 
 func (this *Connection) Close() error {

@@ -56,10 +56,14 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 	rows, err := connection.DB.Query("DESC `" + tableName + "`")
 	if err != nil {
 		this.schema = nil
+		this.errs = append(this.errs, err)
+		return this
 	}
 	columns, err := rows.Columns()
 	if err != nil {
 		this.schema = nil
+		this.errs = append(this.errs, err)
+		return this
 	}
 	columnsNum := len(columns)
 
@@ -118,7 +122,7 @@ func (this *Table) parseFunction(field, alias string, match [][]string) string {
 	arrayParams := strings.Split(strParams, ",")
 	hasErr := false
 	for index := range allowFunctions {
-		if (len(allowFunctions[index])>len(strFunction)) && (allowFunctions[index][:len(strFunction)+1] == strFunction+"(") {
+		if (len(allowFunctions[index]) > len(strFunction)) && (allowFunctions[index][:len(strFunction)+1] == strFunction+"(") {
 			strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
 			arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
 			if len(arrayParams) == len(arrayFunctionDefineParams) {
@@ -138,7 +142,11 @@ func (this *Table) parseFunction(field, alias string, match [][]string) string {
 						}
 					} else if arrayFunctionDefineParams[paramIndex] == "allcolumn" {
 						if (arrayParams[paramIndex] == "*") || this.HasColumn(arrayParams[paramIndex]) {
-							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+							if arrayParams[paramIndex] == "*" {
+								arrayParams[paramIndex] = "*"
+							} else {
+								arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+							}
 						} else {
 							match := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
 							if len(match) > 0 {
@@ -164,7 +172,7 @@ func (this *Table) parseFunction(field, alias string, match [][]string) string {
 		}
 	}
 	if hasErr == false {
-		if alias!= "" {
+		if alias != "" {
 			strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ") AS " + alias
 		} else {
 			strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
@@ -202,7 +210,7 @@ func (this *Table) Fields(fields ...string) *Table {
 						this.addError("Function need define alias")
 					} else {
 						strFunctionField := this.parseFunction(field, alias, match)
-						if len(strFunctionField)>0 {
+						if len(strFunctionField) > 0 {
 							this.fields = append(this.fields, strFunctionField)
 							this.alias = append(this.alias, alias)
 						}
@@ -662,8 +670,9 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 		strSql = "UPDATE `" + this.name + "` SET "
 
 		arrayUpdates := make([]string, 0)
+
 		for key, value := range this.data.(map[string]interface{}) {
-			strUpdate := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
+			strUpdate := "`" + key + "` = " + this.getConditionName("UPDATE", key, value)
 			arrayUpdates = append(arrayUpdates, strUpdate)
 		}
 		strSql += utils.Implode(", ", arrayUpdates)
@@ -672,11 +681,17 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 		if len(whereSql) > 0 {
 			strSql += " WHERE " + whereSql
 		}
+		if this.limit > 0 {
+			strSql += fmt.Sprintf(" LIMIT %d", this.limit)
+		}
 	} else if queryType == "DELETE" {
 		strSql = "DELETE FROM `" + this.name + "`"
 		whereSql := this.parseWhere(this.name, "")
 		if len(whereSql) > 0 {
 			strSql += " WHERE " + whereSql
+		}
+		if this.limit > 0 {
+			strSql += fmt.Sprintf(" LIMIT %d", this.limit)
 		}
 	}
 	return strSql, this.conditionValues
@@ -689,7 +704,7 @@ func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[s
 
 	results := make([]map[string]interface{}, 0)
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
-	fmt.Println(strSql, argv)
+	//fmt.Println(strSql, argv)
 	stmt, err := this.connection.DB.Prepare(strSql)
 	if err != nil {
 		return results, err
@@ -736,7 +751,7 @@ func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64
 		return 0, this.errs[0]
 	}
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
-	fmt.Println(strSql, argv)
+	//fmt.Println(strSql, argv)
 	var stmt *sql.Stmt
 	var err error
 	if this.connection.Transaction {
@@ -790,18 +805,41 @@ func (this *Table) First() (map[string]interface{}, error) {
 }
 
 func (this *Table) Insert(data map[string]interface{}) (int64, error) {
-	for key := range data {
-		if !this.HasColumn(key) {
-			return 0, errors.New("Unknown `Insert` column '" + key + "' in 'field list'")
+	if len(data) > 0 {
+		for key := range data {
+			if !this.HasColumn(key) {
+				return 0, errors.New("Unknown `Insert` column '" + key + "' in 'field list'")
+			}
 		}
+		this.data = data
+		strSql, argv := this.buildQuery("INSERT")
+		return this.Execute(strSql, argv)
+	} else {
+		return 0, errors.New("No fields for `Insert`")
 	}
-	this.data = data
-	strSql, argv := this.buildQuery("INSERT")
-	return this.Execute(strSql, argv)
 }
 
 func (this *Table) Update(data map[string]interface{}) (int64, error) {
-	if len(this.where)>0 {
+	if len(this.where) > 0 {
+		if len(data) > 0 {
+			for key := range data {
+				if !this.HasColumn(key) {
+					return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
+				}
+			}
+			this.data = data
+			strSql, argv := this.buildQuery("UPDATE")
+			return this.Execute(strSql, argv)
+		} else {
+			return 0, errors.New("No fields for `Update`")
+		}
+	} else {
+		return 0, errors.New("`Update` without any condition, use UpdateForce method")
+	}
+}
+
+func (this *Table) UpdateForce(data map[string]interface{}) (int64, error) {
+	if len(data) > 0 {
 		for key := range data {
 			if !this.HasColumn(key) {
 				return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
@@ -810,24 +848,12 @@ func (this *Table) Update(data map[string]interface{}) (int64, error) {
 		this.data = data
 		strSql, argv := this.buildQuery("UPDATE")
 		return this.Execute(strSql, argv)
-	} else {
-		return 0, errors.New("`Update` without any condition, use UpdateForce method")
 	}
-}
-
-func (this *Table) UpdateForce(data map[string]interface{}) (int64, error) {
-	for key := range data {
-		if !this.HasColumn(key) {
-			return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
-		}
-	}
-	this.data = data
-	strSql, argv := this.buildQuery("UPDATE")
-	return this.Execute(strSql, argv)
+	return 0, errors.New("no fields for `Update`")
 }
 
 func (this *Table) Delete() (int64, error) {
-	if len(this.where)>0 {
+	if len(this.where) > 0 {
 		strSql, argv := this.buildQuery("DELETE")
 		return this.Execute(strSql, argv)
 	} else {
