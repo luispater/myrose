@@ -192,13 +192,13 @@ MIT
 - 强制对使用的数据表中的字段进行检查，对查询中不存在的字段，不允许提交查询
 - 对Delete、Update等操作进行安全检查，当没有任何Where条件的情况下，不允许提交查询
 - 可使用DeleteForce、UpdateForce强制提交没有任何Where条件的查询
+- 完成基础配置部分的代码
+- 在README.md中添加使用代码
 
 ### 开发计划
 
 > 0.0.2
 
-- 完成基础配置部分的代码
-- 在README.md中添加使用代码
 - Where及Having中允许使用函数
 - 增加不允许使用原始查询（Query、Execute）开关
 - UPDATE语句中增加类似a = a + 1的语法，原子操作，避免事务操作中的更新丢失（Lost Update）
