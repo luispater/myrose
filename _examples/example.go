@@ -15,9 +15,11 @@ func main() {
 	//fmt.Println(b, err)
 	tableCenter := db.Table("center")
 	tableCenter.Where("ce_id", ">", 0)
-	a := db.Table("customer").RightJoin(tableCenter, "ce_id", "c_id").Where("ce_id", 1)
+	a := db.Table("customer")//.RightJoin(tableCenter, "ce_id", "c_id")
+	a.Fields("c_id as t")
+	a.Where("ce_id", 1)
 	a.Group("ce_id", "c_id")
-	a.Order().
+	a.Having("t", "54149471")
 	a.Limit(10)
 	a.Offset(10)
 	_, err = a.First()

@@ -84,6 +84,10 @@ func (this *Table) HasColumn(column string) bool {
 	return utils.InArray(column, this.fieldList)
 }
 
+func (this *Table) HasAlias(column string) bool {
+	return utils.InArray(column, this.alias)
+}
+
 func (this *Table) addError(err string) {
 	this.errs = append(this.errs, errors.New(err))
 }
@@ -122,6 +126,34 @@ func (this *Table) Group(group ...string) *Table {
 		}
 	}
 	return this
+}
+
+func (this *Table) havingCommon(havingType string, args ...interface{}) *Table {
+	if this.having == nil {
+		this.having = make([]interface{}, 0)
+	}
+	argsLen := len(args)
+	if argsLen < 2 {
+		this.addError("Split column name in Where method")
+	} else if (argsLen == 2) || (argsLen == 3) {
+		// TODO: 此处需要处理函数型字段名
+		if this.HasAlias(utils.ToStr(args[0])) {
+			this.having = append(this.having, []interface{}{havingType, args})
+		} else {
+			this.addError("Unknown `Having` column '" + utils.ToStr(args[0]) + "' in 'field list' and 'alias list'")
+		}
+	} else {
+		this.addError("Too much `Having` conditions")
+	}
+	return this
+}
+
+func (this *Table) Having(args ...interface{}) *Table {
+	return this.havingCommon("AND", args...)
+}
+
+func (this *Table) OrHaving(args ...interface{}) *Table {
+	return this.havingCommon("OR", args...)
 }
 
 func (this *Table) Order(args ...interface{}) *Table {
@@ -230,7 +262,7 @@ func (this *Table) getConditionName(prefix, columnName string, value interface{}
 	return ":" + strConditionName
 }
 
-func (this *Table) parseInCondition(fieldName string, argv interface{}) string {
+func (this *Table) parseInCondition(prefix, fieldName string, argv interface{}) string {
 	result := ""
 	switch argv.(type) {
 	case *Table:
@@ -242,37 +274,37 @@ func (this *Table) parseInCondition(fieldName string, argv interface{}) string {
 	case []int64:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]int64) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]int64)[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]int64)[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	case []int:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]int) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]int)[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]int)[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	case []string:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]string) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]string)[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]string)[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	case []float64:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]float64) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]float64)[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]float64)[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	case []float32:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]float32) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]float32)[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]float32)[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	case []interface{}:
 		arrayConditionNames := make([]string, 0)
 		for i := range argv.([]interface{}) {
-			arrayConditionNames = append(arrayConditionNames, this.getConditionName("WHERE", fieldName, argv.([]interface{})[i]))
+			arrayConditionNames = append(arrayConditionNames, this.getConditionName(prefix, fieldName, argv.([]interface{})[i]))
 		}
 		result = "(" + utils.Implode(", ", arrayConditionNames) + ")"
 	}
@@ -288,9 +320,9 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		arrayWhereCondition := make([]string, 3)
 		if whereLen == 2 { // columnName, value: `columnName`=1
 			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
+				arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
 			} else {
-				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+				arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
 			}
 
 			arrayWhereCondition[1] = "="
@@ -298,9 +330,9 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		} else if whereLen == 3 { // columnName, operation, value: `columnName`>=1
 			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
 			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayWhereCondition[0] = "`" + this.name + "`." + utils.ToStr(arrayCondition[0].(string))
+				arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
 			} else {
-				arrayWhereCondition[0] = utils.ToStr(arrayCondition[0].(string))
+				arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
 			}
 			arrayWhereCondition[1] = operation
 
@@ -310,9 +342,9 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 			case "NOT LIKE":
 				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
 			case "IN":
-				arrayWhereCondition[2] = this.parseInCondition(arrayWhereCondition[0], arrayCondition[2])
+				arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
 			case "NOT IN":
-				arrayWhereCondition[2] = this.parseInCondition(arrayWhereCondition[0], arrayCondition[2])
+				arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
 			case "IS":
 				arrayWhereCondition[2] = "NULL"
 			case "IS NOT":
@@ -322,7 +354,7 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 			default:
 				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
 			}
-		} else if whereLen == 4 { // table, columnName, operation, value: `table2`.`columnName`>=1
+		} else {
 
 		}
 		strCondition = utils.Implode(" ", arrayWhereCondition)
@@ -342,6 +374,70 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		}
 	}
 	return strWhere
+}
+
+func (this *Table) parseHaving(tableName, strHaving string) string {
+	var strCondition string
+	for i := range this.having {
+		arrayHaving := this.having[i].([]interface{})
+		arrayCondition := arrayHaving[1].([]interface{})
+		havingLen := len(arrayCondition)
+		arrayHavingCondition := make([]string, 3)
+		if havingLen == 2 { // columnName, value: `columnName`=1
+			if (len(this.join) > 0) || (tableName != this.name) {
+				arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			} else {
+				arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			}
+			arrayHavingCondition[1] = "="
+			arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[1])
+		} else if havingLen == 3 { // columnName, operation, value: `columnName`>=1
+			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
+			if (len(this.join) > 0) || (tableName != this.name) {
+				arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			} else {
+				arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			}
+			arrayHavingCondition[1] = operation
+
+			switch operation {
+			case "LIKE":
+				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			case "NOT LIKE":
+				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			case "IN":
+				arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			case "NOT IN":
+				arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			case "IS":
+				arrayHavingCondition[2] = "NULL"
+			case "IS NOT":
+				arrayHavingCondition[2] = "NULL"
+			case "BETWEEN":
+			case "NOT BETWEEN":
+			default:
+				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			}
+		} else {
+
+		}
+		strCondition = utils.Implode(" ", arrayHavingCondition)
+
+		if len(strHaving) > 0 {
+			strHaving += " " + arrayHaving[0].(string) + " " + strCondition
+		} else {
+			strHaving += strCondition
+		}
+	}
+	for i := range this.join {
+		arrayJoin := this.join[i].([]interface{})
+		joinDetail := arrayJoin[1].([]interface{})
+		strHaving = joinDetail[0].(*Table).parseHaving(tableName, strHaving)
+		for k, v := range joinDetail[0].(*Table).conditionValues {
+			this.conditionValues[k] = v
+		}
+	}
+	return strHaving
 }
 
 func (this *Table) parseJoin() string {
@@ -374,29 +470,42 @@ func (this *Table) parseGroup() string {
 	return strGroup
 }
 
+func (this *Table) parseFields() string {
+	strFields := ""
+	if len(this.fields) > 0 {
+		arrayFields := make([]string, 0)
+		for i := range this.fields {
+			asIndex := strings.Index(strings.ToUpper(this.fields[i]), " AS ")
+			var field string
+			if asIndex == -1 {
+				field = this.fields[i]
+				fieldSql := "`" + this.name + "`.`" + field + "`"
+				arrayFields = append(arrayFields, fieldSql)
+			} else {
+				field = this.fields[i][:asIndex]
+				fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
+				arrayFields = append(arrayFields, fieldSql)
+			}
+		}
+		strFields += utils.Implode(", ", arrayFields)
+	} else {
+		strFields += "`" + this.name + "`.*"
+	}
+	for i := range this.join {
+		arrayJoin := this.join[i].([]interface{})
+		joinDetail := arrayJoin[1].([]interface{})
+		strJoinFields := joinDetail[0].(*Table).parseFields()
+		strFields += ", " + strJoinFields
+	}
+
+	return strFields
+}
+
 func (this *Table) buildQuery(queryType string) (string, map[string]interface{}) {
 	strSql := ""
 	if queryType == "SELECT" {
 		strSql = "SELECT "
-		if len(this.fields) > 0 {
-			arrayFields := make([]string, 0)
-			for i := range this.fields {
-				asIndex := strings.Index(strings.ToUpper(this.fields[i]), " AS ")
-				var field string
-				if asIndex == -1 {
-					field = this.fields[i]
-					fieldSql := "`" + this.name + "`.`" + field + "`"
-					arrayFields = append(arrayFields, fieldSql)
-				} else {
-					field = this.fields[i][:asIndex]
-					fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
-					arrayFields = append(arrayFields, fieldSql)
-				}
-			}
-			strSql += utils.Implode(", ", arrayFields)
-		} else {
-			strSql += "`" + this.name + "`.*"
-		}
+		strSql += this.parseFields()
 		strSql += " FROM `" + this.name + "`"
 
 		joinSql := this.parseJoin()
@@ -412,6 +521,11 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 		groupSql := this.parseGroup()
 		if len(groupSql) > 0 {
 			strSql += " GROUP BY " + groupSql
+		}
+
+		havingSql := this.parseHaving(this.name, "")
+		if len(havingSql) > 0 {
+			strSql += " HAVING " + havingSql
 		}
 
 		if len(this.order) > 0 {
@@ -462,6 +576,10 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 }
 
 func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
+	if len(this.errs)>0 {
+		return nil, this.errs[0]
+	}
+
 	results := make([]map[string]interface{}, 0)
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
 	fmt.Println(strSql, argv)
@@ -507,6 +625,9 @@ func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[s
 }
 
 func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
+	if len(this.errs)>0 {
+		return 0, this.errs[0]
+	}
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
 	fmt.Println(strSql, argv)
 	var stmt *sql.Stmt
