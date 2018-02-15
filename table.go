@@ -801,6 +801,21 @@ func (this *Table) Insert(data map[string]interface{}) (int64, error) {
 }
 
 func (this *Table) Update(data map[string]interface{}) (int64, error) {
+	if len(this.where)>0 {
+		for key := range data {
+			if !this.HasColumn(key) {
+				return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
+			}
+		}
+		this.data = data
+		strSql, argv := this.buildQuery("UPDATE")
+		return this.Execute(strSql, argv)
+	} else {
+		return 0, errors.New("`Update` without any condition, use UpdateForce method")
+	}
+}
+
+func (this *Table) UpdateForce(data map[string]interface{}) (int64, error) {
 	for key := range data {
 		if !this.HasColumn(key) {
 			return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
@@ -812,6 +827,15 @@ func (this *Table) Update(data map[string]interface{}) (int64, error) {
 }
 
 func (this *Table) Delete() (int64, error) {
+	if len(this.where)>0 {
+		strSql, argv := this.buildQuery("DELETE")
+		return this.Execute(strSql, argv)
+	} else {
+		return 0, errors.New("`Delete` without any condition, use DeleteForce method")
+	}
+}
+
+func (this *Table) DeleteForce() (int64, error) {
 	strSql, argv := this.buildQuery("DELETE")
 	return this.Execute(strSql, argv)
 }

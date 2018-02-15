@@ -26,5 +26,6 @@ func main() {
 	fmt.Println(err)
 	_, err = a.Get()
 	fmt.Println(err)
-
+	dd := map[string]interface{}{"id":3}
+	fmt.Println(dd)
 }
