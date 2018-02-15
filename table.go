@@ -11,7 +11,6 @@ import (
 
 var allowFunctions = []string{
 	"FROM_UNIXTIME(column)",
-	"FROM_UNIXTIME(column,string)",
 	"DATE_FORMAT(column,string)",
 	"ABS(column)",
 	"CEIL(column)",
@@ -52,7 +51,7 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 	this.connection = connection
 	this.conditionValues = make(map[string]interface{})
 	this.errs = make([]error, 0)
-	this.reg = regexp.MustCompile(`(.*?)\((.*?)\)`)
+	this.reg = regexp.MustCompile(`(.*?)\((.*)\)`)
 
 	rows, err := connection.DB.Query("DESC `" + tableName + "`")
 	if err != nil {
@@ -112,6 +111,69 @@ func (this *Table) addError(err string) {
 	this.errs = append(this.errs, errors.New(err))
 }
 
+func (this *Table) parseFunction(field, alias string, match [][]string) string {
+	strFunctionField := ""
+	strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
+	strParams := match[0][2]
+	arrayParams := strings.Split(strParams, ",")
+	hasErr := false
+	for index := range allowFunctions {
+		if (len(allowFunctions[index])>len(strFunction)) && (allowFunctions[index][:len(strFunction)+1] == strFunction+"(") {
+			strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
+			arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
+			if len(arrayParams) == len(arrayFunctionDefineParams) {
+				for paramIndex := range arrayFunctionDefineParams {
+					if arrayFunctionDefineParams[paramIndex] == "column" {
+						if this.HasColumn(arrayParams[paramIndex]) {
+							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+						} else {
+							match := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
+							if len(match) > 0 {
+								strFunctionField := this.parseFunction("", "", match)
+								arrayParams[paramIndex] = strFunctionField
+							} else {
+								hasErr = true
+								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+							}
+						}
+					} else if arrayFunctionDefineParams[paramIndex] == "allcolumn" {
+						if (arrayParams[paramIndex] == "*") || this.HasColumn(arrayParams[paramIndex]) {
+							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+						} else {
+							match := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
+							if len(match) > 0 {
+								strFunctionField := this.parseFunction("", "", match)
+								arrayParams[paramIndex] = strFunctionField
+							} else {
+								hasErr = true
+								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+							}
+						}
+					} else if arrayFunctionDefineParams[paramIndex] == "string" {
+						if ((arrayParams[paramIndex][:1] == `"`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `"`)) || (arrayParams[paramIndex][:1] == `'`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `'`) {
+							// do something ?
+						} else {
+							hasErr = true
+							this.addError("Function `" + strFunction + "` param number " + utils.ToStr(paramIndex) + " error")
+						}
+					}
+				}
+			} else {
+				this.addError("Function `" + strFunction + "` params error")
+			}
+		}
+	}
+	if hasErr == false {
+		if alias!= "" {
+			strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ") AS " + alias
+		} else {
+			strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
+		}
+
+	}
+	return strFunctionField
+}
+
 func (this *Table) Fields(fields ...string) *Table {
 	for i := range fields {
 		if strings.Trim(fields[i], " ") == "*" {
@@ -139,46 +201,8 @@ func (this *Table) Fields(fields ...string) *Table {
 					if asIndex == -1 {
 						this.addError("Function need define alias")
 					} else {
-						strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
-						strParams := match[0][2]
-						arrayParams := strings.Split(strParams, ",")
-						hasErr := false
-						for index := range allowFunctions {
-							if allowFunctions[index][:len(strFunction)+1] == strFunction+"(" {
-								strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
-								arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
-								if len(arrayParams) == len(arrayFunctionDefineParams) {
-									for paramIndex := range arrayFunctionDefineParams {
-										if arrayFunctionDefineParams[paramIndex] == "column" {
-											if this.HasColumn(arrayParams[paramIndex]) {
-												arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-											} else {
-												hasErr = true
-												this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
-											}
-										} else if arrayFunctionDefineParams[paramIndex] == "allcolumn" {
-											if (arrayParams[paramIndex] == "*") || this.HasColumn(arrayParams[paramIndex]) {
-												arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-											} else {
-												hasErr = true
-												this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
-											}
-										} else if arrayFunctionDefineParams[paramIndex] == "string" {
-											if ((arrayParams[paramIndex][:1] == `"`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `"`)) || (arrayParams[paramIndex][:1] == `'`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `'`) {
-												// do something ?
-											} else {
-												hasErr = true
-												this.addError("Function `" + strFunction + "` param number " + utils.ToStr(paramIndex) + " error")
-											}
-										}
-									}
-								} else {
-									this.addError("Function `" + strFunction + "` params error")
-								}
-							}
-						}
-						if hasErr == false {
-							strFunctionField := strFunction + "(" + utils.Implode(", ", arrayParams) + ") AS " + alias
+						strFunctionField := this.parseFunction(field, alias, match)
+						if len(strFunctionField)>0 {
 							this.fields = append(this.fields, strFunctionField)
 							this.alias = append(this.alias, alias)
 						}
