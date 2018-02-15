@@ -26,24 +26,25 @@ var allowFunctions = []string{
 }
 
 type Table struct {
-	connection      *Connection              // db connection
-	schema          []map[string]interface{} // schema
-	name            string                   // table name
-	fieldList       []string                 // table filed list
-	fields          []string                 // fields
-	alias           []string                 // fields alias
-	where           []interface{}            // where
-	order           [][]string               // order
-	limit           int                      // limit
-	offset          int                      // offset
-	join            []interface{}            // join
-	distinct        bool                     // distinct
-	group           []string                 // group
-	having          []interface{}            // having
-	data            interface{}              // data
-	conditionValues map[string]interface{}   // query condition value
-	errs            []error                  // errors
-	reg             *regexp.Regexp           // function regexp
+	connection        *Connection              // db connection
+	schema            []map[string]interface{} // schema
+	name              string                   // table name
+	fieldList         []string                 // table filed list
+	fields            []string                 // fields
+	alias             []string                 // fields alias
+	where             []interface{}            // where
+	order             [][]string               // order
+	limit             int                      // limit
+	offset            int                      // offset
+	join              []interface{}            // join
+	distinct          bool                     // distinct
+	group             []string                 // group
+	having            []interface{}            // having
+	data              interface{}              // data
+	conditionValues   map[string]interface{}   // query condition value
+	errs              []error                  // errors
+	reg               *regexp.Regexp           // function regexp
+	insertOnDuplicate interface{}              // INSERT ... ON DUPLICATE KEY UPDATE
 }
 
 func (this *Table) Init(tableName string, connection *Connection) *Table {
@@ -51,19 +52,28 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 	this.connection = connection
 	this.conditionValues = make(map[string]interface{})
 	this.errs = make([]error, 0)
-	this.reg = regexp.MustCompile(`(.*?)\((.*)\)`)
+	this.reg = this.connection.FunctionRegxp
 
-	rows, err := connection.DB.Query("DESC `" + tableName + "`")
+	if fieldsList, hasKey := this.connection.Fields[tableName]; hasKey {
+		this.fieldList = fieldsList
+	} else {
+		this.FlushTableFields()
+	}
+	return this
+}
+
+func (this *Table) FlushTableFields() bool {
+	rows, err := this.connection.DB.Query("DESC `" + this.name + "`")
 	if err != nil {
 		this.schema = nil
 		this.errs = append(this.errs, err)
-		return this
+		return false
 	}
 	columns, err := rows.Columns()
 	if err != nil {
 		this.schema = nil
 		this.errs = append(this.errs, err)
-		return this
+		return false
 	}
 	columnsNum := len(columns)
 
@@ -95,8 +105,9 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 		fileds = append(fileds, schema[i]["Field"].(string))
 	}
 	this.fieldList = fileds
+	this.connection.Fields[this.name] = fileds
 	rows.Close()
-	return this
+	return true
 }
 
 func (this *Table) SetConnection(connection *Connection) {
@@ -697,7 +708,7 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 	return strSql, this.conditionValues
 }
 
-func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
+func (this *Table) query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
 	if len(this.errs) > 0 {
 		return nil, this.errs[0]
 	}
@@ -746,7 +757,15 @@ func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[s
 	return results, nil
 }
 
-func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
+func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
+	if this.connection.AllowNative {
+		return this.query(strSql, mapArgv)
+	} else {
+		return nil, errors.New("Native query disallow")
+	}
+}
+
+func (this *Table) execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
 	if len(this.errs) > 0 {
 		return 0, this.errs[0]
 	}
@@ -781,9 +800,17 @@ func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64
 	return result, err
 }
 
+func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
+	if this.connection.AllowNative {
+		return this.Execute(strSql, mapArgv)
+	} else {
+		return 0, errors.New("Native query disallow")
+	}
+}
+
 func (this *Table) Get() ([]map[string]interface{}, error) {
 	strSql, argv := this.buildQuery("SELECT")
-	return this.Query(strSql, argv)
+	return this.query(strSql, argv)
 }
 
 func (this *Table) First() (map[string]interface{}, error) {
@@ -794,7 +821,7 @@ func (this *Table) First() (map[string]interface{}, error) {
 	this.offset = 0
 
 	strSql, argv := this.buildQuery("SELECT")
-	result, err := this.Query(strSql, argv)
+	result, err := this.query(strSql, argv)
 	if err != nil {
 		return nil, err
 	}
@@ -813,7 +840,7 @@ func (this *Table) Insert(data map[string]interface{}) (int64, error) {
 		}
 		this.data = data
 		strSql, argv := this.buildQuery("INSERT")
-		return this.Execute(strSql, argv)
+		return this.execute(strSql, argv)
 	} else {
 		return 0, errors.New("No fields for `Insert`")
 	}
@@ -829,7 +856,7 @@ func (this *Table) Update(data map[string]interface{}) (int64, error) {
 			}
 			this.data = data
 			strSql, argv := this.buildQuery("UPDATE")
-			return this.Execute(strSql, argv)
+			return this.execute(strSql, argv)
 		} else {
 			return 0, errors.New("No fields for `Update`")
 		}
@@ -847,7 +874,7 @@ func (this *Table) UpdateForce(data map[string]interface{}) (int64, error) {
 		}
 		this.data = data
 		strSql, argv := this.buildQuery("UPDATE")
-		return this.Execute(strSql, argv)
+		return this.execute(strSql, argv)
 	}
 	return 0, errors.New("no fields for `Update`")
 }
@@ -855,7 +882,7 @@ func (this *Table) UpdateForce(data map[string]interface{}) (int64, error) {
 func (this *Table) Delete() (int64, error) {
 	if len(this.where) > 0 {
 		strSql, argv := this.buildQuery("DELETE")
-		return this.Execute(strSql, argv)
+		return this.execute(strSql, argv)
 	} else {
 		return 0, errors.New("`Delete` without any condition, use DeleteForce method")
 	}
@@ -863,5 +890,5 @@ func (this *Table) Delete() (int64, error) {
 
 func (this *Table) DeleteForce() (int64, error) {
 	strSql, argv := this.buildQuery("DELETE")
-	return this.Execute(strSql, argv)
+	return this.execute(strSql, argv)
 }

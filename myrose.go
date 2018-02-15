@@ -4,13 +4,17 @@ import (
 	"database/sql"
 	_ "github.com/go-sql-driver/mysql"
 	//"fmt"
+	"regexp"
 )
 
 type Connection struct {
-	DB          *sql.DB
-	Tx          *sql.Tx
-	Transaction bool
-	GlobalId    int64
+	DB            *sql.DB
+	Tx            *sql.Tx
+	Transaction   bool
+	GlobalId      int64
+	Fields        map[string][]string
+	FunctionRegxp *regexp.Regexp
+	AllowNative   bool
 }
 
 var dbConnection *Connection
@@ -24,6 +28,8 @@ func newConnection(dsn string) (*Connection, error) {
 		dbConnection = new(Connection)
 	}
 	dbConnection.DB = db
+	dbConnection.Fields = make(map[string][]string)
+	dbConnection.FunctionRegxp = regexp.MustCompile(`(.*?)\((.*)\)`)
 	return dbConnection, nil
 }
 
@@ -51,6 +57,18 @@ func (this *Connection) SetMaxIdleConns(n int) {
 
 func (this *Connection) SetMaxOpenConns(n int) {
 	this.DB.SetMaxOpenConns(50)
+}
+
+func (this *Connection) FlushTableCache() {
+	this.Fields = make(map[string][]string)
+}
+
+func (this *Connection) EnableNativeQuery() {
+	this.AllowNative = true
+}
+
+func (this *Connection) DisableNativeQuery() {
+	this.AllowNative = false
 }
 
 func (this *Connection) Close() error {
