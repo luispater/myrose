@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"errors"
 	"database/sql"
+	"regexp"
+)
+
+var (
+	allowFunctions = []string{"ABS(X)", "ACOS(X)", "ASIN(X)", "ATAN(X)", "ATAN(Y,X)", "ATAN2(Y,X)", "CEIL(X)", "CEILING(X)"}
 )
 
 type Table struct {
@@ -26,6 +31,7 @@ type Table struct {
 	data            interface{}              // data
 	conditionValues map[string]interface{}   // query condition value
 	errs            []error                  // errors
+	reg             *regexp.Regexp           // function regexp
 }
 
 func (this *Table) Init(tableName string, connection *Connection) *Table {
@@ -33,6 +39,7 @@ func (this *Table) Init(tableName string, connection *Connection) *Table {
 	this.connection = connection
 	this.conditionValues = make(map[string]interface{})
 	this.errs = make([]error, 0)
+	this.reg = regexp.MustCompile(`(.*?)\((.*?)\)`)
 
 	rows, err := connection.DB.Query("DESC `" + tableName + "`")
 	if err != nil {
@@ -94,21 +101,37 @@ func (this *Table) addError(err string) {
 
 func (this *Table) Fields(fields ...string) *Table {
 	for i := range fields {
-		// TODO: 此处需要处理函数型字段名
-		asIndex := strings.Index(strings.ToUpper(fields[i]), " AS ")
-		var field, alias string
-		if asIndex == -1 {
-			field = fields[i]
-			alias = fields[i]
+		if strings.Trim(fields[i], " ") == "*" {
+			this.fields = append(this.fields, "*")
+			for j := range this.fieldList {
+				this.alias = append(this.alias, this.fieldList[j])
+			}
 		} else {
-			field = fields[i][:asIndex]
-			alias = fields[i][asIndex+4:]
-		}
-		if this.HasColumn(field) {
-			this.fields = append(this.fields, fields[i])
-			this.alias = append(this.alias, alias)
-		} else {
-			this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+			asIndex := strings.Index(strings.ToUpper(fields[i]), " AS ")
+			var field, alias string
+			if asIndex == -1 {
+				field = strings.Trim(fields[i], " ")
+				alias = strings.Trim(fields[i], " ")
+			} else {
+				field = strings.Trim(fields[i][:asIndex], " ")
+				alias = strings.Trim(fields[i][asIndex+4:], " ")
+			}
+
+			if this.HasColumn(field) {
+				this.fields = append(this.fields, strings.Trim(fields[i], " "))
+				this.alias = append(this.alias, alias)
+			} else {
+				// TODO: 此处需要处理函数型字段名
+				match := this.reg.FindAllStringSubmatch(field, -1)
+				if len(match) > 0 {
+					strFunction := match[0][1]
+					strParams := match[0][2]
+					arrayParams := strings.Split(strParams, ",")
+					fmt.Println(strFunction, strParams, arrayParams)
+				} else {
+					this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+				}
+			}
 		}
 	}
 	return this
@@ -576,7 +599,7 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 }
 
 func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[string]interface{}, error) {
-	if len(this.errs)>0 {
+	if len(this.errs) > 0 {
 		return nil, this.errs[0]
 	}
 
@@ -625,7 +648,7 @@ func (this *Table) Query(strSql string, mapArgv map[string]interface{}) ([]map[s
 }
 
 func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
-	if len(this.errs)>0 {
+	if len(this.errs) > 0 {
 		return 0, this.errs[0]
 	}
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
