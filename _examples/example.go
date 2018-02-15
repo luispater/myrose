@@ -16,7 +16,7 @@ func main() {
 	tableCenter := db.Table("center")
 	tableCenter.Where("ce_id", ">", 0)
 	a := db.Table("customer")//.RightJoin(tableCenter, "ce_id", "c_id")
-	a.Fields("*", "sum(c_id) as t")
+	a.Fields("*", "sum(c_id) as t", "now() as d")
 	a.Where("ce_id", 1)
 	a.Group("ce_id", "c_id")
 	a.Having("t", "54149471")

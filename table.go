@@ -9,9 +9,22 @@ import (
 	"regexp"
 )
 
-var (
-	allowFunctions = []string{"ABS(X)", "ACOS(X)", "ASIN(X)", "ATAN(X)", "ATAN(Y,X)", "ATAN2(Y,X)", "CEIL(X)", "CEILING(X)"}
-)
+var allowFunctions = []string{
+	"FROM_UNIXTIME(column)",
+	"FROM_UNIXTIME(column,string)",
+	"DATE_FORMAT(column,string)",
+	"ABS(column)",
+	"CEIL(column)",
+	"CEILING(column)",
+	"FLOOR(column)",
+	"NOW()",
+	"UNIX_TIMESTAMP()",
+	"COUNT(allcolumn)",
+	"SUM(column)",
+	"MAX(column)",
+	"MIN(column)",
+	"AVG(column)",
+}
 
 type Table struct {
 	connection      *Connection              // db connection
@@ -121,13 +134,55 @@ func (this *Table) Fields(fields ...string) *Table {
 				this.fields = append(this.fields, strings.Trim(fields[i], " "))
 				this.alias = append(this.alias, alias)
 			} else {
-				// TODO: 此处需要处理函数型字段名
 				match := this.reg.FindAllStringSubmatch(field, -1)
 				if len(match) > 0 {
-					strFunction := match[0][1]
-					strParams := match[0][2]
-					arrayParams := strings.Split(strParams, ",")
-					fmt.Println(strFunction, strParams, arrayParams)
+					if asIndex == -1 {
+						this.addError("Function need define alias")
+					} else {
+						strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
+						strParams := match[0][2]
+						arrayParams := strings.Split(strParams, ",")
+						hasErr := false
+						for index := range allowFunctions {
+							if allowFunctions[index][:len(strFunction)+1] == strFunction+"(" {
+								strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
+								arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
+								if len(arrayParams) == len(arrayFunctionDefineParams) {
+									for paramIndex := range arrayFunctionDefineParams {
+										if arrayFunctionDefineParams[paramIndex] == "column" {
+											if this.HasColumn(arrayParams[paramIndex]) {
+												arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+											} else {
+												hasErr = true
+												this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+											}
+										} else if arrayFunctionDefineParams[paramIndex] == "allcolumn" {
+											if (arrayParams[paramIndex] == "*") || this.HasColumn(arrayParams[paramIndex]) {
+												arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+											} else {
+												hasErr = true
+												this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+											}
+										} else if arrayFunctionDefineParams[paramIndex] == "string" {
+											if ((arrayParams[paramIndex][:1] == `"`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `"`)) || (arrayParams[paramIndex][:1] == `'`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `'`) {
+												// do something ?
+											} else {
+												hasErr = true
+												this.addError("Function `" + strFunction + "` param number " + utils.ToStr(paramIndex) + " error")
+											}
+										}
+									}
+								} else {
+									this.addError("Function `" + strFunction + "` params error")
+								}
+							}
+						}
+						if hasErr == false {
+							strFunctionField := strFunction + "(" + utils.Implode(", ", arrayParams) + ") AS " + alias
+							this.fields = append(this.fields, strFunctionField)
+							this.alias = append(this.alias, alias)
+						}
+					}
 				} else {
 					this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
 				}
@@ -506,8 +561,13 @@ func (this *Table) parseFields() string {
 				arrayFields = append(arrayFields, fieldSql)
 			} else {
 				field = this.fields[i][:asIndex]
-				fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
-				arrayFields = append(arrayFields, fieldSql)
+				if this.HasColumn(field) {
+					fieldSql := "`" + this.name + "`.`" + field + "` AS " + this.fields[i][asIndex+4:]
+					arrayFields = append(arrayFields, fieldSql)
+				} else {
+					fieldSql := field + " AS " + this.fields[i][asIndex+4:]
+					arrayFields = append(arrayFields, fieldSql)
+				}
 			}
 		}
 		strFields += utils.Implode(", ", arrayFields)
