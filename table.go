@@ -175,6 +175,7 @@ func (this *Table) parseFieldsFunction(field, alias string, match [][]string) st
 			} else {
 				this.addError("Function `" + strFunction + "` params error")
 			}
+			break
 		}
 	}
 	if hasErr == false {
@@ -502,6 +503,7 @@ func (this *Table) parseConditionFunction(field string, inFunction bool) (string
 				} else {
 					return "", errors.New("Function `" + strFunction + "` params error")
 				}
+				break
 			}
 		}
 		strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
