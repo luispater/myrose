@@ -10,20 +10,23 @@ import (
 )
 
 var allowFunctions = []string{
-	"FROM_UNIXTIME(column)",
-	"DATE_FORMAT(column,string)",
-	"ABS(column)",
-	"CEIL(column)",
-	"CEILING(column)",
-	"FLOOR(column)",
+	"FROM_UNIXTIME(column|int)",
+	"DATE_FORMAT(column|string,string)",
+	"ABS(column|int)",
+	"CEIL(column|int)",
+	"CEILING(column|int)",
+	"FLOOR(column|int)",
 	"NOW()",
+	"MD5(column|string)",
 	"UNIX_TIMESTAMP()",
 	"COUNT(allcolumn)",
-	"SUM(column)",
-	"MAX(column)",
-	"MIN(column)",
-	"AVG(column)",
+	"SUM(column|int)",
+	"MAX(column|int)",
+	"MIN(column|int)",
+	"AVG(column|int)",
 }
+
+type Function string
 
 type Table struct {
 	connection        *Connection              // db connection
@@ -126,7 +129,7 @@ func (this *Table) addError(err string) {
 	this.errs = append(this.errs, errors.New(err))
 }
 
-func (this *Table) parseFunction(field, alias string, match [][]string) string {
+func (this *Table) parseFieldsFunction(field, alias string, match [][]string) string {
 	strFunctionField := ""
 	strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
 	strParams := match[0][2]
@@ -138,42 +141,34 @@ func (this *Table) parseFunction(field, alias string, match [][]string) string {
 			arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
 			if len(arrayParams) == len(arrayFunctionDefineParams) {
 				for paramIndex := range arrayFunctionDefineParams {
-					if arrayFunctionDefineParams[paramIndex] == "column" {
-						if this.HasColumn(arrayParams[paramIndex]) {
+
+					arrayParamType := strings.Split(arrayFunctionDefineParams[paramIndex], "|")
+					var isString = func(str string) bool {
+						return ((str[:1] == `"`) && (str[len(str)-1:] == `"`)) || (str[:1] == `'`) && (str[len(str)-1:] == `'`)
+					}
+
+					if utils.InArray("column", arrayParamType) && this.HasColumn(arrayParams[paramIndex]) {
+						arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+					} else if utils.InArray("column", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
+						if arrayParams[paramIndex] == "*" {
+							arrayParams[paramIndex] = "*"
+						} else {
 							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-						} else {
-							match := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
-							if len(match) > 0 {
-								strFunctionField := this.parseFunction("", "", match)
-								arrayParams[paramIndex] = strFunctionField
-							} else {
-								hasErr = true
-								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
-							}
 						}
-					} else if arrayFunctionDefineParams[paramIndex] == "allcolumn" {
-						if (arrayParams[paramIndex] == "*") || this.HasColumn(arrayParams[paramIndex]) {
-							if arrayParams[paramIndex] == "*" {
-								arrayParams[paramIndex] = "*"
-							} else {
-								arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-							}
-						} else {
-							match := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
-							if len(match) > 0 {
-								strFunctionField := this.parseFunction("", "", match)
-								arrayParams[paramIndex] = strFunctionField
-							} else {
-								hasErr = true
-								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
-							}
-						}
-					} else if arrayFunctionDefineParams[paramIndex] == "string" {
-						if ((arrayParams[paramIndex][:1] == `"`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `"`)) || (arrayParams[paramIndex][:1] == `'`) && (arrayParams[paramIndex][len(arrayParams[paramIndex])-1:] == `'`) {
-							// do something ?
+					} else if utils.InArray("string", arrayParamType) && isString(arrayParams[paramIndex]) {
+
+					} else {
+						submatch := this.reg.FindAllStringSubmatch(arrayParams[paramIndex], -1)
+						if len(submatch) > 0 {
+							strFunctionField := this.parseFieldsFunction("", "", submatch)
+							arrayParams[paramIndex] = strFunctionField
 						} else {
 							hasErr = true
-							this.addError("Function `" + strFunction + "` param number " + utils.ToStr(paramIndex) + " error")
+							if field=="" {
+								this.addError("Unknown `Fetch` column '" + match[0][2] + "' in 'field list'")
+							} else {
+								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
+							}
 						}
 					}
 				}
@@ -220,7 +215,7 @@ func (this *Table) Fields(fields ...string) *Table {
 					if asIndex == -1 {
 						this.addError("Function need define alias")
 					} else {
-						strFunctionField := this.parseFunction(field, alias, match)
+						strFunctionField := this.parseFieldsFunction(field, alias, match)
 						if len(strFunctionField) > 0 {
 							this.fields = append(this.fields, strFunctionField)
 							this.alias = append(this.alias, alias)
@@ -324,11 +319,41 @@ func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 	if argsLen < 2 {
 		this.addError("Split column name in Where method")
 	} else if (argsLen == 2) || (argsLen == 3) {
-		// TODO: 此处需要处理函数型字段名
-		if this.HasColumn(utils.ToStr(args[0])) {
-			this.where = append(this.where, []interface{}{whereType, args})
+		ok := true
+		arrayWhere := []interface{}{whereType, args}
+		if utils.IsString(args[0]) {
+			if this.HasColumn(utils.ToStr(args[0])) {
+				arrayWhere = append(arrayWhere, false)
+			} else {
+				strFunction, err := this.parseConditionFunction(args[0].(string))
+				if err != nil {
+					this.errs = append(this.errs, err)
+				}
+				if strFunction != "" {
+					args[0] = strFunction
+					arrayWhere = append(arrayWhere, true)
+				} else {
+					ok = false
+					this.addError("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
+				}
+			}
 		} else {
-			this.addError("Unknown `Where` column '" + utils.ToStr(args[0]) + "' in 'field list'")
+			ok = false
+			this.addError("`Where` method first need string")
+		}
+
+		if utils.IsString(args[len(args)-1]) {
+			strFunction, err := this.parseConditionFunction(args[len(args)-1].(string))
+			if (err == nil) && (strFunction != "") {
+				arrayWhere = append(arrayWhere, true)
+				args[len(args)-1] = strFunction
+			} else {
+				arrayWhere = append(arrayWhere, false)
+			}
+		}
+
+		if ok {
+			this.where = append(this.where, arrayWhere)
 		}
 	} else {
 		this.addError("Too much `Where` conditions")
@@ -432,6 +457,59 @@ func (this *Table) parseInCondition(prefix, fieldName string, argv interface{}) 
 	return result
 }
 
+func (this *Table) parseConditionFunction(field string) (string, error) {
+	match := this.reg.FindAllStringSubmatch(field, -1)
+	strFunctionField := ""
+	if len(match) > 0 {
+		strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
+		strParams := match[0][2]
+		arrayParams := strings.Split(strParams, ",")
+		for index := range allowFunctions {
+			if (len(allowFunctions[index]) > len(strFunction)) && (allowFunctions[index][:len(strFunction)+1] == strFunction+"(") {
+				strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
+				arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
+				if len(arrayParams) == len(arrayFunctionDefineParams) {
+					for paramIndex := range arrayFunctionDefineParams {
+						arrayParamType := strings.Split(arrayFunctionDefineParams[paramIndex], "|")
+
+						var isString = func(str string) bool {
+							return ((str[:1] == `"`) && (str[len(str)-1:] == `"`)) || (str[:1] == `'`) && (str[len(str)-1:] == `'`)
+						}
+
+						if utils.InArray("column", arrayParamType) && this.HasColumn(arrayParams[paramIndex]) {
+							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+						} else if utils.InArray("column", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
+							if arrayParams[paramIndex] == "*" {
+								arrayParams[paramIndex] = "*"
+							} else {
+								arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
+							}
+						} else if utils.InArray("string", arrayParamType) && isString(arrayParams[paramIndex]) {
+
+						} else {
+							strFunctionField, err := this.parseConditionFunction(arrayParams[paramIndex])
+							if err != nil {
+								this.errs = append(this.errs, err)
+							} else {
+								if strFunctionField != "" {
+									arrayParams[paramIndex] = strFunctionField
+								} else {
+									return "", errors.New("Unknown `Fetch` column '" + field + "' in 'field list'")
+								}
+							}
+						}
+					}
+				} else {
+					return "", errors.New("Function `" + strFunction + "` params error")
+				}
+			}
+		}
+		strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
+		return strFunctionField, nil
+	}
+	return field, nil
+}
+
 func (this *Table) parseWhere(tableName, strWhere string) string {
 	var strCondition string
 	for i := range this.where {
@@ -440,40 +518,56 @@ func (this *Table) parseWhere(tableName, strWhere string) string {
 		whereLen := len(arrayCondition)
 		arrayWhereCondition := make([]string, 3)
 		if whereLen == 2 { // columnName, value: `columnName`=1
-			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			if arrayWhere[2].(bool) { //第一个参数是否为函数
+				arrayWhereCondition[0] = arrayCondition[0].(string)
 			} else {
-				arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				if (len(this.join) > 0) || (tableName != this.name) {
+					arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				} else {
+					arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				}
 			}
 
 			arrayWhereCondition[1] = "="
-			arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[1])
+			if arrayWhere[3].(bool) { //第二个参数是否为函数
+				arrayWhereCondition[2] = arrayCondition[1].(string)
+			} else {
+				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[1])
+			}
+
 		} else if whereLen == 3 { // columnName, operation, value: `columnName`>=1
 			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
-			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			if arrayWhere[2].(bool) { //第一个参数是否为函数
+				arrayWhereCondition[0] = arrayCondition[0].(string)
 			} else {
-				arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				if (len(this.join) > 0) || (tableName != this.name) {
+					arrayWhereCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				} else {
+					arrayWhereCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				}
 			}
 			arrayWhereCondition[1] = operation
-
-			switch operation {
-			case "LIKE":
-				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
-			case "NOT LIKE":
-				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
-			case "IN":
-				arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
-			case "NOT IN":
-				arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
-			case "IS":
-				arrayWhereCondition[2] = "NULL"
-			case "IS NOT":
-				arrayWhereCondition[2] = "NULL"
-			case "BETWEEN":
-			case "NOT BETWEEN":
-			default:
-				arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+			if arrayWhere[3].(bool) { //第二个参数是否为函数
+				arrayWhereCondition[2] = arrayCondition[2].(string)
+			} else {
+				switch operation {
+				case "LIKE":
+					arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+				case "NOT LIKE":
+					arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+				case "IN":
+					arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
+				case "NOT IN":
+					arrayWhereCondition[2] = this.parseInCondition("WHERE", arrayWhereCondition[0], arrayCondition[2])
+				case "IS":
+					arrayWhereCondition[2] = "NULL"
+				case "IS NOT":
+					arrayWhereCondition[2] = "NULL"
+				case "BETWEEN":
+				case "NOT BETWEEN":
+				default:
+					arrayWhereCondition[2] = this.getConditionName("WHERE", arrayWhereCondition[0], arrayCondition[2])
+				}
 			}
 		} else {
 
@@ -715,7 +809,7 @@ func (this *Table) query(strSql string, mapArgv map[string]interface{}) ([]map[s
 
 	results := make([]map[string]interface{}, 0)
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
-	//fmt.Println(strSql, argv)
+	fmt.Println(strSql, argv)
 	stmt, err := this.connection.DB.Prepare(strSql)
 	if err != nil {
 		return results, err
