@@ -325,7 +325,7 @@ func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 			if this.HasColumn(utils.ToStr(args[0])) {
 				arrayWhere = append(arrayWhere, false)
 			} else {
-				strFunction, err := this.parseConditionFunction(args[0].(string))
+				strFunction, err := this.parseConditionFunction(args[0].(string), false)
 				if err != nil {
 					this.errs = append(this.errs, err)
 				}
@@ -343,7 +343,7 @@ func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 		}
 
 		if utils.IsString(args[len(args)-1]) {
-			strFunction, err := this.parseConditionFunction(args[len(args)-1].(string))
+			strFunction, err := this.parseConditionFunction(args[len(args)-1].(string), false)
 			if (err == nil) && (strFunction != "") {
 				arrayWhere = append(arrayWhere, true)
 				args[len(args)-1] = strFunction
@@ -457,7 +457,7 @@ func (this *Table) parseInCondition(prefix, fieldName string, argv interface{}) 
 	return result
 }
 
-func (this *Table) parseConditionFunction(field string) (string, error) {
+func (this *Table) parseConditionFunction(field string, inFunction bool) (string, error) {
 	match := this.reg.FindAllStringSubmatch(field, -1)
 	strFunctionField := ""
 	if len(match) > 0 {
@@ -487,14 +487,14 @@ func (this *Table) parseConditionFunction(field string) (string, error) {
 						} else if utils.InArray("string", arrayParamType) && isString(arrayParams[paramIndex]) {
 
 						} else {
-							strFunctionField, err := this.parseConditionFunction(arrayParams[paramIndex])
+							strFunctionField, err := this.parseConditionFunction(arrayParams[paramIndex], true)
 							if err != nil {
 								this.errs = append(this.errs, err)
 							} else {
 								if strFunctionField != "" {
 									arrayParams[paramIndex] = strFunctionField
 								} else {
-									return "", errors.New("Unknown `Fetch` column '" + field + "' in 'field list'")
+									return "", errors.New("Unknown `Condition` column '" + field + "' in 'field list'")
 								}
 							}
 						}
@@ -507,7 +507,11 @@ func (this *Table) parseConditionFunction(field string) (string, error) {
 		strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
 		return strFunctionField, nil
 	}
-	return field, nil
+	if inFunction {
+		return "", errors.New("Unknown `Condition` column '" + field + "' in 'field list'")
+	} else {
+		return field, nil
+	}
 }
 
 func (this *Table) parseWhere(tableName, strWhere string) string {
