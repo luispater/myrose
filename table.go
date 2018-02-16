@@ -164,7 +164,7 @@ func (this *Table) parseFieldsFunction(field, alias string, match [][]string) st
 							arrayParams[paramIndex] = strFunctionField
 						} else {
 							hasErr = true
-							if field=="" {
+							if field == "" {
 								this.addError("Unknown `Fetch` column '" + match[0][2] + "' in 'field list'")
 							} else {
 								this.addError("Unknown `Fetch` column '" + field + "' in 'field list'")
@@ -832,7 +832,12 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 		arrayUpdates := make([]string, 0)
 
 		for key, value := range this.data.(map[string]interface{}) {
-			strUpdate := "`" + key + "` = " + this.getConditionName("UPDATE", key, value)
+			strUpdate := ""
+			if val, ok := value.(Updata); ok {
+				strUpdate = "`" + key + "` = `" + val.field + "` " + val.operation + " " + this.getConditionName("UPDATE", key, val.value)
+			} else {
+				strUpdate = "`" + key + "` = " + this.getConditionName("UPDATE", key, value)
+			}
 			arrayUpdates = append(arrayUpdates, strUpdate)
 		}
 		strSql += utils.Implode(", ", arrayUpdates)
@@ -1001,6 +1006,12 @@ func (this *Table) Update(data map[string]interface{}) (int64, error) {
 			for key := range data {
 				if !this.HasColumn(key) {
 					return 0, errors.New("Unknown `Update` column '" + key + "' in 'field list'")
+				} else {
+					if val, ok := data[key].(Updata); ok {
+						if !this.HasColumn(val.field) {
+							return 0, errors.New("Unknown `Update` column '" + val.field + "' in 'field list'")
+						}
+					}
 				}
 			}
 			this.data = data

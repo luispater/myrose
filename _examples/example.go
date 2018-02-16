@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/luispater/myrose"
+	. "github.com/luispater/myrose"
 	"github.com/luispater/myrose/utils"
 	"fmt"
 )
@@ -9,7 +9,7 @@ import (
 func main() {
 	// connect
 	dsn := "test:test@unix(/tmp/mysql.sock)/myrose?charset=utf8"
-	db, err := myrose.New(dsn)
+	db, err := New(dsn)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -17,7 +17,7 @@ func main() {
 	defer db.Close()
 
 	// insert
-	insert := myrose.NewData()
+	insert := NewData()
 	insert["name"] = "luis"
 	insert["password"] = utils.Md5("luis")
 	insert["status"] = 1
@@ -36,7 +36,7 @@ func main() {
 	fmt.Println(res)
 
 	// update
-	update := myrose.NewData()
+	update := NewData()
 	update["password"] = utils.Md5("luis1")
 	update["status"] = 0
 	intAffectedNum, err := db.Table("users").Where("name", "=", "luis").Update(update)
@@ -55,7 +55,7 @@ func main() {
 
 	// add test data
 	for i:=0; i<1000; i++ {
-		insert := myrose.NewData()
+		insert := NewData()
 		insert["name"] = fmt.Sprintf("luis_%d", i)
 		insert["password"] = utils.Md5("luis")
 		insert["status"] = 1
@@ -64,7 +64,7 @@ func main() {
 			fmt.Println(err)
 		} else {
 			fmt.Printf("Insert Id: %d\n", intInsertId)
-			insert := myrose.NewData()
+			insert := NewData()
 			insert["user_sex"] = "female"
 			insert["user_id"] = intInsertId
 			_, err := db.Table("users_info").Insert(insert)
@@ -112,4 +112,15 @@ func main() {
 		fmt.Println(err)
 	}
 	fmt.Println(rows)
+
+	// update with column value
+	update = NewData()
+	update["status"] = UpdateData("status", "+", 10)
+	intAffectedNum, err = db.Table("users").Where("name", "=", "luis").Update(update)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Printf("Update Affected Number: %d\n", intAffectedNum)
+	}
+
 }

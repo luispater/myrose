@@ -17,6 +17,12 @@ type Connection struct {
 	AllowNative   bool
 }
 
+type Updata struct {
+	field string
+	operation string
+	value interface{}
+}
+
 var dbConnection *Connection
 
 func newConnection(dsn string) (*Connection, error) {
@@ -49,6 +55,10 @@ func New(dsn string) (*Connection, error) {
 
 func NewData() map[string]interface{} {
 	return make(map[string]interface{})
+}
+
+func UpdateData(field string, operation string, value interface{}) Updata {
+	return Updata{field:field, operation:operation, value:value}
 }
 
 func (this *Connection) SetMaxIdleConns(n int) {

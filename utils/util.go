@@ -244,3 +244,5 @@ func DataType(obj interface{}) string {
 		return ""
 	}
 }
+
+
