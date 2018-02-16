@@ -188,6 +188,7 @@ MIT
 > 0.0.2
 
 - 增加不允许使用原始查询（Query、Execute）开关
+- Where及Having中允许使用函数
 
 > 0.0.1
 
@@ -203,5 +204,4 @@ MIT
 
 > 0.0.2
 
-- Where及Having中允许使用函数
 - UPDATE语句中增加类似a = a + 1的语法，原子操作，避免事务操作中的更新丢失（Lost Update）

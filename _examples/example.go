@@ -106,7 +106,8 @@ func main() {
 		fmt.Println(err)
 	}
 	fmt.Println(rows)
-	rows, err = db.Table("users").Where("password", "=", "md5('111')").Get()
+
+	rows, err = db.Table("users").Where("password", "=", "md5('luis')").Having("md5(name)", "md5('luis_0')").Get()
 	if err != nil {
 		fmt.Println(err)
 	}

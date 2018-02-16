@@ -149,7 +149,7 @@ func (this *Table) parseFieldsFunction(field, alias string, match [][]string) st
 
 					if utils.InArray("column", arrayParamType) && this.HasColumn(arrayParams[paramIndex]) {
 						arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-					} else if utils.InArray("column", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
+					} else if utils.InArray("allcolumn", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
 						if arrayParams[paramIndex] == "*" {
 							arrayParams[paramIndex] = "*"
 						} else {
@@ -253,11 +253,43 @@ func (this *Table) havingCommon(havingType string, args ...interface{}) *Table {
 	if argsLen < 2 {
 		this.addError("Split column name in Where method")
 	} else if (argsLen == 2) || (argsLen == 3) {
-		// TODO: 此处需要处理函数型字段名
-		if this.HasAlias(utils.ToStr(args[0])) {
-			this.having = append(this.having, []interface{}{havingType, args})
+		ok := true
+		arrayHaving := []interface{}{havingType, args}
+		if utils.IsString(args[0]) {
+			if this.HasAlias(utils.ToStr(args[0])) || this.HasColumn(utils.ToStr(args[0])) {
+				arrayHaving = append(arrayHaving, false)
+			} else {
+				strFunction, err := this.parseConditionFunction(args[0].(string), false)
+				if err != nil {
+					this.errs = append(this.errs, err)
+				}
+				if strFunction != "" {
+					args[0] = strFunction
+					arrayHaving = append(arrayHaving, true)
+				} else {
+					ok = false
+					this.addError("Unknown `Having` column '" + utils.ToStr(args[0]) + "' in 'field list' and 'alias list'")
+				}
+			}
 		} else {
-			this.addError("Unknown `Having` column '" + utils.ToStr(args[0]) + "' in 'field list' and 'alias list'")
+			ok = false
+			this.addError("`Having` method first need string")
+		}
+
+		if utils.IsString(args[len(args)-1]) {
+			strFunction, err := this.parseConditionFunction(args[len(args)-1].(string), false)
+			if (err == nil) && (strFunction != "") {
+				arrayHaving = append(arrayHaving, true)
+				args[len(args)-1] = strFunction
+			} else {
+				arrayHaving = append(arrayHaving, false)
+			}
+		} else {
+			arrayHaving = append(arrayHaving, false)
+		}
+
+		if ok {
+			this.having = append(this.having, arrayHaving)
 		}
 	} else {
 		this.addError("Too much `Having` conditions")
@@ -351,6 +383,8 @@ func (this *Table) whereCommon(whereType string, args ...interface{}) *Table {
 			} else {
 				arrayWhere = append(arrayWhere, false)
 			}
+		} else {
+			arrayWhere = append(arrayWhere, false)
 		}
 
 		if ok {
@@ -479,7 +513,7 @@ func (this *Table) parseConditionFunction(field string, inFunction bool) (string
 
 						if utils.InArray("column", arrayParamType) && this.HasColumn(arrayParams[paramIndex]) {
 							arrayParams[paramIndex] = "`" + this.name + "`.`" + arrayParams[paramIndex] + "`"
-						} else if utils.InArray("column", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
+						} else if utils.InArray("allcolumn", arrayParamType) && (this.HasColumn(arrayParams[paramIndex]) || (arrayParams[paramIndex] == "*")) {
 							if arrayParams[paramIndex] == "*" {
 								arrayParams[paramIndex] = "*"
 							} else {
@@ -512,7 +546,7 @@ func (this *Table) parseConditionFunction(field string, inFunction bool) (string
 	if inFunction {
 		return "", errors.New("Unknown `Condition` column '" + field + "' in 'field list'")
 	} else {
-		return field, nil
+		return "", nil
 	}
 }
 
@@ -605,39 +639,54 @@ func (this *Table) parseHaving(tableName, strHaving string) string {
 		havingLen := len(arrayCondition)
 		arrayHavingCondition := make([]string, 3)
 		if havingLen == 2 { // columnName, value: `columnName`=1
-			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			if arrayHaving[2].(bool) { //第一个参数是否为函数
+				arrayHavingCondition[0] = arrayCondition[0].(string)
 			} else {
-				arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				if (len(this.join) > 0) || (tableName != this.name) {
+					arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				} else {
+					arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				}
 			}
 			arrayHavingCondition[1] = "="
-			arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[1])
+			if arrayHaving[3].(bool) { //第二个参数是否为函数
+				arrayHavingCondition[2] = arrayCondition[1].(string)
+			} else {
+				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[1])
+			}
 		} else if havingLen == 3 { // columnName, operation, value: `columnName`>=1
 			operation := strings.ToUpper(utils.ToStr(arrayCondition[1]))
-			if (len(this.join) > 0) || (tableName != this.name) {
-				arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+			if arrayHaving[2].(bool) { //第一个参数是否为函数
+				arrayHavingCondition[0] = arrayCondition[0].(string)
 			} else {
-				arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				if (len(this.join) > 0) || (tableName != this.name) {
+					arrayHavingCondition[0] = "`" + this.name + "`.`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				} else {
+					arrayHavingCondition[0] = "`" + utils.ToStr(arrayCondition[0].(string)) + "`"
+				}
 			}
 			arrayHavingCondition[1] = operation
-
-			switch operation {
-			case "LIKE":
-				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
-			case "NOT LIKE":
-				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
-			case "IN":
-				arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
-			case "NOT IN":
-				arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
-			case "IS":
-				arrayHavingCondition[2] = "NULL"
-			case "IS NOT":
-				arrayHavingCondition[2] = "NULL"
-			case "BETWEEN":
-			case "NOT BETWEEN":
-			default:
-				arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+			if arrayHaving[3].(bool) { //第二个参数是否为函数
+				arrayHavingCondition[2] = arrayCondition[2].(string)
+			} else {
+				switch operation {
+				case "LIKE":
+					arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+				case "NOT LIKE":
+					arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+				case "IN":
+					arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
+				case "NOT IN":
+					arrayHavingCondition[2] = this.parseInCondition("HAVING", arrayHavingCondition[0], arrayCondition[2])
+				case "IS":
+					arrayHavingCondition[2] = "NULL"
+				case "IS NOT":
+					arrayHavingCondition[2] = "NULL"
+				case "BETWEEN":
+				case "NOT BETWEEN":
+				default:
+					arrayHavingCondition[2] = this.getConditionName("HAVING", arrayHavingCondition[0], arrayCondition[2])
+				}
 			}
 		} else {
 
@@ -815,7 +864,7 @@ func (this *Table) query(strSql string, mapArgv map[string]interface{}) ([]map[s
 
 	results := make([]map[string]interface{}, 0)
 	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
-	fmt.Println(strSql, argv)
+	//fmt.Println(strSql, argv)
 	stmt, err := this.connection.DB.Prepare(strSql)
 	if err != nil {
 		return results, err
@@ -902,7 +951,7 @@ func (this *Table) execute(strSql string, mapArgv map[string]interface{}) (int64
 
 func (this *Table) Execute(strSql string, mapArgv map[string]interface{}) (int64, error) {
 	if this.connection.AllowNative {
-		return this.Execute(strSql, mapArgv)
+		return this.execute(strSql, mapArgv)
 	} else {
 		return 0, errors.New("Native query disallow")
 	}
