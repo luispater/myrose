@@ -184,6 +184,9 @@ MIT
 - [Pull requests](https://github.com/luispater/myrose/pulls)
 
 ### 更新日志
+> 1.0.2
+
+- 为配合gopkg.in，将版本升级至1.0.2，代码无任何改编
 
 > 0.0.2
 
@@ -203,6 +206,6 @@ MIT
 
 ### 开发计划
 
-> 0.0.3
+> 1.0.3
 
 - 目前暂无开发计划
