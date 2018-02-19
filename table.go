@@ -778,9 +778,18 @@ func (this *Table) parseFields() string {
 
 func (this *Table) buildQuery(queryType string) (string, map[string]interface{}) {
 	strSql := ""
-	if queryType == "SELECT" {
-		strSql = "SELECT "
-		strSql += this.parseFields()
+	if (queryType == "SELECT") || (queryType == "SELECT COUNT") {
+		if queryType == "SELECT COUNT" {
+			if len(this.group) > 0 || len(this.having) > 0 {
+				strSql = "SELECT COUNT(*) AS count FROM (SELECT "
+				strSql += this.parseFields()
+			} else {
+				strSql = "SELECT COUNT(*) AS count"
+			}
+		} else {
+			strSql = "SELECT "
+			strSql += this.parseFields()
+		}
 		strSql += " FROM `" + this.name + "`"
 
 		joinSql := this.parseJoin()
@@ -803,20 +812,26 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 			strSql += " HAVING " + havingSql
 		}
 
-		if len(this.order) > 0 {
-			arrayOrders := make([]string, 0)
-			for i := range this.order {
-				orderSql := "`" + this.name + "`.`" + this.order[i][0] + "` " + this.order[i][1]
-				arrayOrders = append(arrayOrders, orderSql)
+		if queryType == "SELECT" {
+			if len(this.order) > 0 {
+				arrayOrders := make([]string, 0)
+				for i := range this.order {
+					orderSql := "`" + this.name + "`.`" + this.order[i][0] + "` " + this.order[i][1]
+					arrayOrders = append(arrayOrders, orderSql)
+				}
+				strSql += " ORDER BY " + utils.Implode(", ", arrayOrders)
 			}
-			strSql += " ORDER BY " + utils.Implode(", ", arrayOrders)
+
+			if this.limit > 0 {
+				strSql += fmt.Sprintf(" LIMIT %d", this.limit)
+			}
+			if this.offset > 0 {
+				strSql += fmt.Sprintf(" OFFSET %d", this.offset)
+			}
 		}
 
-		if this.limit > 0 {
-			strSql += fmt.Sprintf(" LIMIT %d", this.limit)
-		}
-		if this.offset > 0 {
-			strSql += fmt.Sprintf(" OFFSET %d", this.offset)
+		if (queryType == "SELECT COUNT") && (len(this.group) > 0 || len(this.having) > 0) {
+			strSql += ") AS t"
 		}
 	} else if queryType == "INSERT" {
 		strSql = "INSERT INTO `" + this.name + "` SET "
@@ -1051,4 +1066,33 @@ func (this *Table) Delete() (int64, error) {
 func (this *Table) DeleteForce() (int64, error) {
 	strSql, argv := this.buildQuery("DELETE")
 	return this.execute(strSql, argv)
+}
+
+func (this *Table) Count() (int64, error) {
+	limit := this.limit
+	offset := this.offset
+	defer func() { this.limit = limit; this.offset = offset }() //revert
+	this.limit = 1
+	this.offset = 0
+
+	strSql, argv := this.buildQuery("SELECT COUNT")
+	result, err := this.query(strSql, argv)
+	if err != nil {
+		return 0, err
+	}
+	if len(result) == 0 {
+		return 0, nil
+	}
+	return result[0]["count"].(int64), nil
+}
+
+func (this *Table) Page(pageIndex, pageSize int) ([]map[string]interface{}, error) {
+	limit := this.limit
+	offset := this.offset
+	defer func() { this.limit = limit; this.offset = offset }() //revert
+	this.limit = pageSize
+	this.offset = pageIndex * pageSize
+
+	strSql, argv := this.buildQuery("SELECT")
+	return this.query(strSql, argv)
 }

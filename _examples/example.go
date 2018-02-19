@@ -15,7 +15,6 @@ func main() {
 		return
 	}
 	defer db.Close()
-
 	// insert
 	insert := NewData()
 	insert["name"] = "luis"
@@ -121,6 +120,19 @@ func main() {
 		fmt.Println(err)
 	} else {
 		fmt.Printf("Update Affected Number: %d\n", intAffectedNum)
+	}
+	query := db.Table("users").Group("status")
+	intCount, err := query.Count()
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(intCount)
+	}
+	mapUsers, err := query.Page(1, 1)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(mapUsers)
 	}
 
 }
