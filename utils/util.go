@@ -62,6 +62,21 @@ func Md5(str string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+func AddSingleQuotes(data interface{}) string {
+	return "'" + strings.Replace(ToStr(data), "'", `\'`, -1) + "'"
+}
+
+func GetNamedSQLTemp(strSql string, argv map[string]interface{}) (string, []interface{}) {
+	newArgv := make([]interface{}, 0)
+	for key, value := range argv {
+		intIndex := strings.Index(strSql, ":"+key)
+		if intIndex != -1 {
+			strSql = strings.Replace(strSql, ":"+key, AddSingleQuotes(value), 1)
+		}
+	}
+	return strSql, newArgv
+}
+
 func GetNamedSQL(strSql string, argv map[string]interface{}) (string, []interface{}) {
 	arrayIndexs := make([]int, 0)
 	mapArgv := make(map[int]interface{})
