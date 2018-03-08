@@ -883,7 +883,7 @@ func (this *Table) query(strSql string, mapArgv map[string]interface{}) ([]map[s
 	}
 
 	results := make([]map[string]interface{}, 0)
-	strSql, argv := utils.GetNamedSQLTemp(strSql, mapArgv)
+	strSql, argv := utils.GetNamedSQL(strSql, mapArgv)
 	//fmt.Println(strSql, argv)
 	stmt, err := this.connection.DB.Prepare(strSql)
 	if err != nil {
@@ -938,14 +938,14 @@ func (this *Table) execute(strSql string, mapArgv map[string]interface{}) (int64
 	if len(this.errs) > 0 {
 		return 0, this.errs[0]
 	}
-	strSql, argv := utils.GetNamedSQLTemp(strSql, mapArgv)
+	strNewSql, argv := utils.GetNamedSQL(strSql, mapArgv)
 	//fmt.Println(strSql, argv)
 	var stmt *sql.Stmt
 	var err error
 	if this.connection.Transaction {
-		stmt, err = this.connection.Tx.Prepare(strSql)
+		stmt, err = this.connection.Tx.Prepare(strNewSql)
 	} else {
-		stmt, err = this.connection.DB.Prepare(strSql)
+		stmt, err = this.connection.DB.Prepare(strNewSql)
 	}
 
 	if err != nil {

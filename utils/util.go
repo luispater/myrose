@@ -62,38 +62,25 @@ func Md5(str string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func AddSingleQuotes(data interface{}) string {
-	return "'" + strings.Replace(ToStr(data), "'", `\'`, -1) + "'"
-}
-
-func GetNamedSQLTemp(strSql string, argv map[string]interface{}) (string, []interface{}) {
-	newArgv := make([]interface{}, 0)
-	for key, value := range argv {
-		intIndex := strings.Index(strSql, ":"+key)
-		if intIndex != -1 {
-			strSql = strings.Replace(strSql, ":"+key, AddSingleQuotes(value), 1)
-		}
-	}
-	return strSql, newArgv
-}
-
 func GetNamedSQL(strSql string, argv map[string]interface{}) (string, []interface{}) {
+	strNewSql := strSql
 	arrayIndexs := make([]int, 0)
 	mapArgv := make(map[int]interface{})
 	newArgv := make([]interface{}, 0)
+
 	for key, value := range argv {
 		intIndex := strings.Index(strSql, ":"+key)
 		if intIndex != -1 {
 			arrayIndexs = append(arrayIndexs, intIndex)
 			mapArgv[intIndex] = value
-			strSql = strings.Replace(strSql, ":"+key, "?", 1)
+			strNewSql = strings.Replace(strNewSql, ":"+key, "?", 1)
 		}
 	}
 	sort.Ints(arrayIndexs)
 	for i := range arrayIndexs {
 		newArgv = append(newArgv, mapArgv[arrayIndexs[i]])
 	}
-	return strSql, newArgv
+	return strNewSql, newArgv
 }
 
 //noinspection GoUnusedExportedFunction
