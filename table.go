@@ -499,8 +499,10 @@ func (this *Table) parseConditionFunction(field string, inFunction bool) (string
 		strFunction := strings.ToUpper(strings.Trim(match[0][1], " "))
 		strParams := match[0][2]
 		arrayParams := strings.Split(strParams, ",")
+		isFunction := false
 		for index := range allowFunctions {
 			if (len(allowFunctions[index]) > len(strFunction)) && (allowFunctions[index][:len(strFunction)+1] == strFunction+"(") {
+				isFunction = true
 				strFunctionDefineParams := allowFunctions[index][len(strFunction)+1:len(allowFunctions[index])-1]
 				arrayFunctionDefineParams := strings.Split(strFunctionDefineParams, ",")
 				if len(arrayParams) == len(arrayFunctionDefineParams) {
@@ -540,8 +542,12 @@ func (this *Table) parseConditionFunction(field string, inFunction bool) (string
 				break
 			}
 		}
-		strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
-		return strFunctionField, nil
+		if isFunction {
+			strFunctionField = strFunction + "(" + utils.Implode(", ", arrayParams) + ")"
+			return strFunctionField, nil
+		} else {
+			return "", nil
+		}
 	}
 	if inFunction {
 		return "", errors.New("Unknown `Condition` column '" + field + "' in 'field list'")
