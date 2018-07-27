@@ -1048,7 +1048,6 @@ func (this *Table) InsertDuplicateKeyUpdate(data map[string]interface{}, update 
 		this.data = data
 		this.insertOnDuplicate = update
 		strSql, argv := this.buildQuery("INSERT_DUPLICATE_KEY_UPDATE")
-		fmt.Println(strSql, argv)
 		return this.execute(strSql, argv)
 	} else {
 		return 0, errors.New("No fields for `Insert`")
