@@ -840,14 +840,31 @@ func (this *Table) buildQuery(queryType string) (string, map[string]interface{})
 			strSql += ") AS t"
 		}
 	} else if queryType == "INSERT" {
-		strSql = "INSERT INTO `" + this.name + "` SET "
-		arrayInserts := make([]string, 0)
-		for key, value := range this.data.(map[string]interface{}) {
-			strInsert := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
-			arrayInserts = append(arrayInserts, strInsert)
-		}
-		strSql += utils.Implode(", ", arrayInserts)
-	} else if queryType == "UPDATE" {
+        strSql = "INSERT INTO `" + this.name + "` SET "
+        arrayInserts := make([]string, 0)
+        for key, value := range this.data.(map[string]interface{}) {
+            strInsert := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
+            arrayInserts = append(arrayInserts, strInsert)
+        }
+        strSql += utils.Implode(", ", arrayInserts)
+    } else if queryType == "INSERT_DUPLICATE_KEY_UPDATE" {
+        strSql = "INSERT INTO `" + this.name + "` SET "
+        arrayInserts := make([]string, 0)
+        for key, value := range this.data.(map[string]interface{}) {
+            strInsert := "`" + key + "` = " + this.getConditionName("INSERT", key, value)
+            arrayInserts = append(arrayInserts, strInsert)
+        }
+        strSql += utils.Implode(", ", arrayInserts)
+
+        strSql += " ON DUPLICATE KEY UPDATE "
+        arrayDuplicateUpdates := make([]string, 0)
+        for key, value := range this.insertOnDuplicate.(map[string]interface{}) {
+            strDuplicateUpdate := "`" + key + "` = " + this.getConditionName("DUPLICATE", key, value)
+            arrayDuplicateUpdates = append(arrayDuplicateUpdates, strDuplicateUpdate)
+        }
+        strSql += utils.Implode(", ", arrayDuplicateUpdates)
+
+    } else if queryType == "UPDATE" {
 		strSql = "UPDATE `" + this.name + "` SET "
 
 		arrayUpdates := make([]string, 0)
@@ -1020,6 +1037,24 @@ func (this *Table) Insert(data map[string]interface{}) (int64, error) {
 		return 0, errors.New("No fields for `Insert`")
 	}
 }
+
+func (this *Table) InsertDuplicateKeyUpdate(data map[string]interface{}, update map[string]interface{}) (int64, error) {
+	if len(data) > 0 {
+		for key := range data {
+			if !this.HasColumn(key) {
+				return 0, errors.New("Unknown `Insert` column '" + key + "' in 'field list'")
+			}
+		}
+		this.data = data
+		this.insertOnDuplicate = update
+		strSql, argv := this.buildQuery("INSERT_DUPLICATE_KEY_UPDATE")
+		fmt.Println(strSql, argv)
+		return this.execute(strSql, argv)
+	} else {
+		return 0, errors.New("No fields for `Insert`")
+	}
+}
+
 
 func (this *Table) Update(data map[string]interface{}) (int64, error) {
 	if len(this.where) > 0 {
