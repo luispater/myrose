@@ -35,7 +35,7 @@ func newConnection(dsn string) (*Connection, error) {
 	}
 	dbConnection.DB = db
 	dbConnection.Fields = make(map[string][]string)
-	dbConnection.FunctionRegxp = regexp.MustCompile(`(.*?)\((.*)\)`)
+	dbConnection.FunctionRegxp = regexp.MustCompile(`([A-Za-z0-9_])\((.*)\)`)
 	return dbConnection, nil
 }
 
