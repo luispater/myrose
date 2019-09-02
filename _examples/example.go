@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// connect
-	dsn := "test:test@unix(/tmp/mysql.sock)/myrose?charset=utf8"
+	dsn := "root@unix(/tmp/mysql.sock)/myrose?charset=utf8&allowNativePasswords=true"
 	db, err := New(dsn)
 	if err != nil {
 		fmt.Println(err)

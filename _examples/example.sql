@@ -6,7 +6,7 @@ CREATE TABLE `users` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`),
   KEY `status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='users'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='users';
 
 CREATE TABLE `users_info` (
   `user_id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
